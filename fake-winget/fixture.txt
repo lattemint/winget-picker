@@ -1,0 +1,50 @@
+名称                                                         ID                                 版本                可用                 源
+-----------------------------------------------------------------------------------------------------------------------------------------------
+7-Zip 26.05 (x64)                                            7zip.7zip                          26.05               26.06                winget
+Adobe Acrobat (64-bit)                                       Adobe.Acrobat.Pro                  26.002.21900        26.002.22031         winget
+Arduino IDE 2.3.8                                            ArduinoSA.IDE.stable               2.3.8               2.3.11               winget
+AstrBot Launcher                                             AstrBot.AstrBotLauncher            0.3.14              0.3.15               winget
+Audacity 3.7.3                                               Audacity.Audacity                  3.7.3               4.0.2.263060742      winget
+Autodesk Fusion                                              Autodesk.Fusion                    2603.1.52           2706.1.17            winget
+BitComet                                                     CometNetwork.BitComet              2.19.12.15          2.23                 winget
+CPUID CPU-Z 3.01                                             CPUID.CPU-Z                        3.01                3.02                 winget
+draw.io                                                      JGraph.Draw                        26.1.1.0            32.6.10              winget
+Everything 1.4.1.1030 (x64)                                  voidtools.Everything               1.4.1.1030          1.4.1.1032           winget
+FastCopy                                                     FastCopy.FastCopy                  5.11.2              5.12.0               winget
+FinePrint                                                    FineprintSoftware.FinePrint        12.30               12.36                winget
+foobar2000 汉化版                                            PeterPawlowski.foobar2000          v2.1.6 x64 汉化版   2.26.2               winget
+Git                                                          Git.Git                            2.55.0.5            2.56.0.4             winget
+GitHub Desktop                                               GitHub.GitHubDesktop               3.6.7               3.6.11               winget
+Internet Download Manager                                    Tonec.InternetDownloadManager      6.43.7              6.43.18              winget
+LM Studio 0.4.25+1                                           ElementLabs.LMStudio               0.4.25+1            0.4.28+2             winget
+Microsoft .NET Core Runtime - 3.1.10 (x64)                   Microsoft.DotNet.Runtime.3_1       < 3.1.25            3.1.32               winget
+Microsoft Build of OpenJDK  25.0.4.1+1 (x64)                 Microsoft.OpenJDK.25               25.0.4.101          25.0.5.21            winget
+Microsoft ODBC Driver 17 for SQL Server                      Microsoft.msodbcsql.17             17.10.6.1           17.11.1.1            winget
+Microsoft OLE DB Driver for SQL Server                       Microsoft.SQLServer.OLEDBDriver.18 18.7.4.0            18.7.6.0             winget
+Microsoft Teams                                              Microsoft.Teams                    1.0.0.0             26288.2004.5269.3420 winget
+Microsoft Visual C++ v14 Redistributable (x64) - 14.51.36247 Microsoft.VCRedist.2015+.x64       14.51.36247.0       14.52.37029.0        winget
+Microsoft Visual C++ v14 Redistributable (x86) - 14.51.36247 Microsoft.VCRedist.2015+.x86       14.51.36247.0       14.52.37029.0        winget
+Microsoft Visual Studio 2010 Tools for Office Runtime (x64)  Microsoft.VSTOR                    10.0.60724          10.0.60917           winget
+Node.js                                                      OpenJS.NodeJS.LTS                  26.13.0             26.13.1              winget
+NVIDIA PhysX                                                 Nvidia.PhysXLegacy                 9.12.1031           9.13.0604            winget
+Obsidian                                                     Obsidian.Obsidian                  1.15.0              1.15.1               winget
+OpenAL                                                       CreativeTechnology.OpenAL          Unknown             1.1                  winget
+OpenSSL 4.0.3 Light (64-bit)                                 ShiningLight.OpenSSL.Light         4.0.3               4.1.0                winget
+PDF24 Creator 11.30.1                                        geeksoftwareGmbH.PDF24Creator      11.30.1             11.34.0              winget
+Portmaster                                                   Safing.Portmaster                  2.1.7               2.2.8                winget
+Potplayer                                                    Daum.PotPlayer                     1.7.22838.0         26.10.21.0           winget
+PowerToys (Preview) x64                                      Microsoft.PowerToys                0.96.1              0.102.3101           winget
+Python Launcher                                              Python.Launcher                    3.14.7              3.15.2               winget
+QQ                                                           Tencent.QQ.NT                      9.9.21.39038        9.9.33.52230         winget
+reMarkable                                                   reMarkable.reMarkableCompanionApp  3.27.3              3.29.0               winget
+Rustup: the Rust toolchain installer                         Rustlang.Rustup                    1.29.2              1.29.3               winget
+SketchUp 2025                                                Trimble.SketchUp.2025              25.0.571            25.0.660             winget
+Sunshine                                                     LizardByte.Sunshine                1.2.0.dfe4982.dirty 2026.914.233613      winget
+Tailscale                                                    Tailscale.Tailscale                1.104.5             1.104.7              winget
+Unity Hub 3.15.2                                             Unity.UnityHub                     < 3.21.0.65535      3.22.6.65535         winget
+Wireshark 4.6.7 x64                                          WiresharkFoundation.Wireshark      4.6.7               4.6.9                winget
+企业微信                                                     Tencent.WeCom                      5.0.12.6026         5.0.13.6005          winget
+微信                                                         Tencent.WeChat.Universal           4.1.15.56           4.2.0.52             winget
+百度网盘                                                     Baidu.BaiduNetdisk                 8.0.4               8.10.3               winget
+网易云音乐                                                   NetEase.CloudMusic                 3.1.41.205529       3.1.43.205627        winget
+47 升级可用。

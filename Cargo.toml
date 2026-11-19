@@ -1,0 +1,16 @@
+[package]
+name = "winget-picker"
+version = "0.1.0"
+edition = "2021"
+description = "小型 winget 选择性升级工具（零第三方依赖，纯 Win32）"
+
+[[bin]]
+name = "winget-picker"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

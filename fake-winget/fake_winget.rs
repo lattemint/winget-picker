@@ -1,0 +1,44 @@
+// 测试用假 winget：列出时输出真实捕获的 winget 表格；升级时记录参数并模拟成功/失败。
+use std::io::Write;
+use std::time::Duration;
+
+fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+
+    if let Some(dir) = &exe_dir {
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(dir.join("calls.log"))
+        {
+            let _ = writeln!(f, "{}", args.join(" "));
+        }
+    }
+
+    let listing = !args.iter().any(|a| a == "--id");
+    if listing {
+        if let Some(dir) = &exe_dir {
+            if let Ok(text) = std::fs::read_to_string(dir.join("fixture.txt")) {
+                print!("{}", text);
+            }
+        }
+        return;
+    }
+
+    let id = args
+        .iter()
+        .position(|a| a == "--id")
+        .and_then(|i| args.get(i + 1))
+        .cloned()
+        .unwrap_or_default();
+    std::thread::sleep(Duration::from_millis(400));
+    if id == "CreativeTechnology.OpenAL" {
+        eprintln!("安装程序哈希校验失败，升级已中止。");
+        eprintln!("winget 返回错误（0x8A15002B）。");
+        std::process::exit(1);
+    }
+    println!("已成功升级 {id}");
+}
