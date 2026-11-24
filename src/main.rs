@@ -202,6 +202,29 @@ struct NMLISTVIEW {
 }
 zero_default!(NMLISTVIEW);
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct NMCUSTOMDRAW {
+    hdr: NMHDR,
+    draw_stage: UINT,
+    hdc: HDC,
+    rc: RECT,
+    item_spec: usize,
+    u_item: UINT,
+    item_l_param: LPARAM,
+}
+zero_default!(NMCUSTOMDRAW);
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct NMLVCUSTOMDRAW {
+    nmcd: NMCUSTOMDRAW,
+    clr_text: u32,
+    clr_text_bk: u32,
+    i_sub_item: i32,
+}
+zero_default!(NMLVCUSTOMDRAW);
+
 // ---------------------------------------------------------------- Win32 常量
 
 const WM_DESTROY: UINT = 0x0002;
@@ -237,6 +260,7 @@ const LVS_EX_DOUBLEBUFFER: DWORD = 0x0001_0000;
 const LVM_FIRST: UINT = 0x1000;
 const LVM_GETITEMCOUNT: UINT = LVM_FIRST + 4;
 const LVM_DELETEALLITEMS: UINT = LVM_FIRST + 9;
+const LVM_ENSUREVISIBLE: UINT = LVM_FIRST + 19;
 const LVM_GETHEADER: UINT = LVM_FIRST + 31;
 const LVM_SETITEMSTATE: UINT = LVM_FIRST + 43;
 const LVM_GETITEMSTATE: UINT = LVM_FIRST + 44;
@@ -259,8 +283,24 @@ const NM_FIRST: UINT = 0;
 const LVN_FIRST: UINT = 0u32.wrapping_sub(100);
 const NM_DBLCLK: UINT = NM_FIRST.wrapping_sub(3);
 const LVN_ITEMCHANGED: UINT = LVN_FIRST.wrapping_sub(1);
+const NM_CUSTOMDRAW: UINT = NM_FIRST.wrapping_sub(12);
+
+// ListView 自定义绘制（用于行内进度着色）
+const CDDS_PREPAINT: UINT = 0x0000_0001;
+const CDDS_ITEMPREPAINT: UINT = 0x0001_0001;
+const CDDS_SUBITEM: UINT = 0x0002_0000;
+const CDRF_DODEFAULT: LRESULT = 0;
+const CDRF_NEWFONT: LRESULT = 0x2;
+const CDRF_NOTIFYITEMDRAW: LRESULT = 0x20;
+const CDRF_NOTIFYSUBITEMDRAW: LRESULT = 0x20;
 
 const ICC_LISTVIEW_CLASSES: DWORD = 0x0000_0001;
+const ICC_PROGRESS_CLASS: DWORD = 0x0000_0020;
+
+// 进度条
+const PBM_SETRANGE32: UINT = 0x0400 + 6;
+const PBM_SETPOS: UINT = 0x0400 + 2;
+const PBS_SMOOTH: DWORD = 0x0001;
 const SPI_GETNONCLIENTMETRICS: UINT = 0x0029;
 const LOGPIXELSX: i32 = 88;
 const COLOR_BTNFACE: i32 = 15;
@@ -292,6 +332,7 @@ const ID_TITLE: i32 = 1007;
 const ID_SUBTITLE: i32 = 1008;
 const ID_STATUS: i32 = 1009;
 const ID_LIST: i32 = 1010;
+const ID_PROGRESS: i32 = 1011;
 
 // ---------------------------------------------------------------- Win32 导入
 
@@ -340,6 +381,7 @@ unsafe extern "system" {
     fn ReleaseDC(hwnd: HWND, dc: HDC) -> i32;
     fn GetSysColor(index: i32) -> DWORD;
     fn GetSysColorBrush(index: i32) -> HBRUSH;
+    fn InvalidateRect(hwnd: HWND, rect: *const RECT, erase: BOOL) -> BOOL;
 }
 
 #[link(name = "gdi32")]
@@ -409,6 +451,11 @@ fn enable(hwnd: HWND, on: bool) {
     unsafe {
         EnableWindow(hwnd, on as BOOL);
     }
+}
+
+/// COLORREF：0x00BBGGRR
+fn rgb(r: u32, g: u32, b: u32) -> u32 {
+    (r & 0xFF) | ((g & 0xFF) << 8) | ((b & 0xFF) << 16)
 }
 
 fn message_box(owner: HWND, text: &str, flags: UINT) {
@@ -1003,6 +1050,7 @@ struct App {
     btn_exit: HWND,
     status: HWND,
     list: HWND,
+    progress: HWND,
     btn_all: HWND,
     btn_none: HWND,
     btn_upgrade: HWND,
@@ -1016,6 +1064,16 @@ struct App {
     finished: usize,
     ok: usize,
     fail: usize,
+    /// 开始升级时的勾选快照（升级期间锁定勾选状态）
+    upgrade_checked: Vec<bool>,
+    /// 每一行的结果状态：0=未处理 1=成功 2=失败 3=等待/进行中
+    results: Vec<u8>,
+    /// 当前正在升级的行
+    current_index: Option<usize>,
+    current_name: String,
+    current_n: usize,
+    current_start: Option<std::time::Instant>,
+    last_status_tick: Option<std::time::Instant>,
 }
 
 unsafe fn make_child(
@@ -1108,12 +1166,17 @@ impl App {
         // 清单界面
         let status = make_child(
             hwnd, instance, &class_static, "",
-            SS_LEFT | SS_NOPREFIX, 0, s(16), s(12), s(788), s(24), ID_STATUS, font,
+            SS_LEFT | SS_NOPREFIX, 0, s(16), s(10), s(788), s(22), ID_STATUS, font,
+        );
+        let class_progress = wide("msctls_progress32");
+        let progress = make_child(
+            hwnd, instance, &class_progress, "",
+            PBS_SMOOTH, 0, s(16), s(36), s(788), s(12), ID_PROGRESS, font,
         );
         let list = make_child(
             hwnd, instance, &class_list, "",
             LVS_REPORT | LVS_SHOWSELALWAYS | WS_TABSTOP,
-            WS_EX_CLIENTEDGE, s(16), s(42), s(788), s(422), ID_LIST, font,
+            WS_EX_CLIENTEDGE, s(16), s(52), s(788), s(412), ID_LIST, font,
         );
         if !list.is_null() {
             let ex_style = (LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_CHECKBOXES | LVS_EX_DOUBLEBUFFER) as LPARAM;
@@ -1173,6 +1236,7 @@ impl App {
             btn_exit,
             status,
             list,
+            progress,
             btn_all,
             btn_none,
             btn_upgrade,
@@ -1186,7 +1250,17 @@ impl App {
             finished: 0,
             ok: 0,
             fail: 0,
+            upgrade_checked: Vec::new(),
+            results: Vec::new(),
+            current_index: None,
+            current_name: String::new(),
+            current_n: 0,
+            current_start: None,
+            last_status_tick: None,
         });
+        unsafe {
+            SendMessageW(progress, PBM_SETRANGE32, 0, 100);
+        }
         app.apply_phase();
         app
     }
@@ -1195,23 +1269,30 @@ impl App {
         let phase = self.phase;
         let init = phase == Phase::Init;
         let list_mode = phase == Phase::List;
+        let upgrading = phase == Phase::Upgrading;
         show(self.title, init);
         show(self.subtitle, init);
         show(self.btn_view, init);
         show(self.btn_exit, init);
         show(self.status, !init);
+        show(self.progress, upgrading);
         show(self.list, !init);
         show(self.btn_all, !init);
         show(self.btn_none, !init);
         show(self.btn_upgrade, !init);
         show(self.btn_back, !init);
-        enable(self.list, list_mode);
+        // 升级期间列表保持可用：可以滚动/查看进度，只是勾选会被锁定
+        enable(self.list, list_mode || upgrading);
         enable(self.btn_all, list_mode);
         enable(self.btn_none, list_mode);
         enable(self.btn_back, list_mode);
         enable(self.btn_upgrade, false);
         if list_mode {
             self.refresh_upgrade_button();
+            unsafe {
+                SetFocus(self.list);
+            }
+        } else if upgrading {
             unsafe {
                 SetFocus(self.list);
             }
@@ -1222,18 +1303,16 @@ impl App {
         }
     }
 
+    fn is_checked(&self, index: usize) -> bool {
+        let state = unsafe {
+            SendMessageW(self.list, LVM_GETITEMSTATE, index, LVIS_STATEIMAGEMASK as LPARAM)
+        } as u32;
+        (state >> 12) == 2
+    }
+
     fn checked_indices(&self) -> Vec<usize> {
         let count = unsafe { SendMessageW(self.list, LVM_GETITEMCOUNT, 0, 0) } as usize;
-        let mut out = Vec::new();
-        for i in 0..count {
-            let state = unsafe {
-                SendMessageW(self.list, LVM_GETITEMSTATE, i, LVIS_STATEIMAGEMASK as LPARAM)
-            } as u32;
-            if (state >> 12) == 2 {
-                out.push(i);
-            }
-        }
-        out
+        (0..count).filter(|&i| self.is_checked(i)).collect()
     }
 
     fn set_checked(&self, index: usize, on: bool) {
@@ -1278,6 +1357,53 @@ impl App {
 
     fn set_result(&self, row: usize, text: &str) {
         self.set_sub_text(row, 4, text);
+    }
+
+    fn set_progress(&self, pos: usize) {
+        unsafe {
+            SendMessageW(self.progress, PBM_SETPOS, pos, 0);
+        }
+    }
+
+    fn invalidate_list(&self) {
+        unsafe {
+            InvalidateRect(self.list, std::ptr::null(), 0);
+        }
+    }
+
+    fn upgrade_status_text(&self, secs: u64) -> String {
+        format!(
+            "正在升级 {}/{}（成功 {} · 失败 {} · 已用 {}s）：{}",
+            self.current_n,
+            self.total,
+            self.ok,
+            self.fail,
+            secs,
+            truncate_chars(&self.current_name, 48)
+        )
+    }
+
+    fn refresh_upgrade_status(&self) {
+        let secs = self
+            .current_start
+            .map(|s| s.elapsed().as_secs())
+            .unwrap_or(0);
+        self.set_status(&self.upgrade_status_text(secs));
+    }
+
+    /// 升级期间定时刷新状态（“已用 Ns”），让用户知道当前包仍在处理中
+    fn tick_upgrade_status(&mut self) {
+        if self.phase != Phase::Upgrading || self.current_start.is_none() {
+            return;
+        }
+        let now = std::time::Instant::now();
+        if let Some(last) = self.last_status_tick {
+            if now.duration_since(last).as_millis() < 500 {
+                return;
+            }
+        }
+        self.last_status_tick = Some(now);
+        self.refresh_upgrade_status();
     }
 
     fn insert_row(&self, index: usize) {
@@ -1356,6 +1482,8 @@ impl App {
                 .then_with(|| a.id.cmp(&b.id))
         });
         self.items = items;
+        self.results = vec![0u8; self.items.len()];
+        self.upgrade_checked.clear();
         for i in 0..self.items.len() {
             self.insert_row(i);
         }
@@ -1377,10 +1505,16 @@ impl App {
     fn begin_upgrade(&mut self, indices: Vec<usize>) {
         let total = indices.len();
         let mut selected: Vec<(usize, Item)> = Vec::with_capacity(total);
+        // 记录勾选快照，升级期间保持锁定
+        self.upgrade_checked = (0..self.items.len()).map(|i| self.is_checked(i)).collect();
+        self.results = vec![0u8; self.items.len()];
         for &i in &indices {
             if let Some(item) = self.items.get(i) {
                 selected.push((i, item.clone()));
                 self.set_result(i, "等待中");
+                if let Some(r) = self.results.get_mut(i) {
+                    *r = 3;
+                }
             }
         }
         self.phase = Phase::Upgrading;
@@ -1388,8 +1522,17 @@ impl App {
         self.finished = 0;
         self.ok = 0;
         self.fail = 0;
+        self.current_index = None;
+        self.current_name.clear();
+        self.current_n = 0;
+        self.current_start = None;
+        self.last_status_tick = None;
+        self.set_progress(0);
         self.set_status(&format!("准备升级 {total} 个软件…"));
         self.apply_phase();
+        unsafe {
+            SendMessageW(self.progress, PBM_SETRANGE32, 0, total as LPARAM);
+        }
         self.start_timer();
         let tx = self.tx.clone();
         thread::spawn(move || {
@@ -1431,8 +1574,16 @@ impl App {
         self.stop_timer();
         self.phase = Phase::Init;
         self.items.clear();
+        self.results.clear();
+        self.upgrade_checked.clear();
+        self.current_index = None;
+        self.current_name.clear();
+        self.current_n = 0;
+        self.current_start = None;
+        self.last_status_tick = None;
         unsafe {
             SendMessageW(self.list, LVM_DELETEALLITEMS, 0, 0);
+            SendMessageW(self.progress, PBM_SETPOS, 0, 0);
         }
         self.total = 0;
         self.finished = 0;
@@ -1467,22 +1618,46 @@ impl App {
                 n,
                 total,
             } => {
-                self.set_status(&format!("正在升级（{n}/{total}）：{name}"));
+                self.current_index = Some(index);
+                self.current_name = name;
+                self.current_n = n;
+                self.total = total;
+                self.current_start = Some(std::time::Instant::now());
+                self.last_status_tick = Some(std::time::Instant::now());
+                if let Some(r) = self.results.get_mut(index) {
+                    if *r != 1 && *r != 2 {
+                        *r = 3;
+                    }
+                }
                 self.set_result(index, "升级中…");
+                self.refresh_upgrade_status();
+                self.set_progress(self.finished);
+                unsafe {
+                    // 当前行不在可视范围时自动滚动过去，方便看到“正在升级”的行
+                    SendMessageW(self.list, LVM_ENSUREVISIBLE, index, 0);
+                }
+                self.invalidate_list();
                 None
             }
             TaskMsg::ProgressResult { index, ok } => {
                 self.set_result(index, if ok { "成功" } else { "失败" });
+                if let Some(r) = self.results.get_mut(index) {
+                    *r = if ok { 1 } else { 2 };
+                }
+                self.current_index = None;
+                self.current_start = None;
                 self.finished += 1;
                 if ok {
                     self.ok += 1;
                 } else {
                     self.fail += 1;
                 }
+                self.set_progress(self.finished);
                 self.set_status(&format!(
-                    "已处理 {}/{}（成功 {}，失败 {}）",
+                    "已完成 {}/{}（成功 {}，失败 {}）",
                     self.finished, self.total, self.ok, self.fail
                 ));
+                self.invalidate_list();
                 None
             }
             TaskMsg::UpgradeDone { ok, fail, failures } => {
@@ -1565,38 +1740,84 @@ impl App {
         }
     }
 
-    unsafe fn on_notify(&mut self, lparam: LPARAM) {
+    unsafe fn on_notify(&mut self, lparam: LPARAM) -> LRESULT {
         if lparam == 0 {
-            return;
+            return 0;
         }
         let hdr = &*(lparam as *const NMHDR);
         if hdr.id_from != ID_LIST as usize {
-            return;
+            return 0;
         }
-        if self.phase != Phase::List {
-            return;
-        }
-        let code = hdr.code as i32;
-        if hdr.code == LVN_ITEMCHANGED {
-            self.refresh_upgrade_button();
-        } else if hdr.code == NM_DBLCLK {
-            let nmlv = &*(lparam as *const NMLISTVIEW);
-            if nmlv.i_item >= 0 {
-                let index = nmlv.i_item as usize;
-                if index < self.items.len() {
-                    let state = SendMessageW(
-                        self.list,
-                        LVM_GETITEMSTATE,
-                        index,
-                        LVIS_STATEIMAGEMASK as LPARAM,
-                    ) as u32;
-                    let on = (state >> 12) != 2;
-                    self.set_checked(index, on);
+        match hdr.code {
+            LVN_ITEMCHANGED => {
+                if self.phase == Phase::List {
                     self.refresh_upgrade_button();
+                } else if self.phase == Phase::Upgrading {
+                    // 升级期间锁定勾选：任何勾选变化都还原到开始升级时的快照
+                    let nmlv = &*(lparam as *const NMLISTVIEW);
+                    let index = nmlv.i_item;
+                    if index >= 0 && (index as usize) < self.items.len() {
+                        let want = self
+                            .upgrade_checked
+                            .get(index as usize)
+                            .copied()
+                            .unwrap_or(false);
+                        if self.is_checked(index as usize) != want {
+                            self.set_checked(index as usize, want);
+                        }
+                    }
+                }
+                0
+            }
+            NM_DBLCLK => {
+                if self.phase == Phase::List {
+                    let nmlv = &*(lparam as *const NMLISTVIEW);
+                    if nmlv.i_item >= 0 {
+                        let index = nmlv.i_item as usize;
+                        if index < self.items.len() {
+                            let on = !self.is_checked(index);
+                            self.set_checked(index, on);
+                            self.refresh_upgrade_button();
+                        }
+                    }
+                }
+                0
+            }
+            NM_CUSTOMDRAW => self.on_custom_draw(lparam),
+            _ => 0,
+        }
+    }
+
+    /// 行着色：当前行高亮背景；结果列按 成功/失败/等待 着色。
+    unsafe fn on_custom_draw(&self, lparam: LPARAM) -> LRESULT {
+        let cd = &mut *(lparam as *mut NMLVCUSTOMDRAW);
+        let stage = cd.nmcd.draw_stage;
+        if stage == CDDS_PREPAINT {
+            return CDRF_NOTIFYITEMDRAW;
+        }
+        if stage & CDDS_ITEMPREPAINT == 0 {
+            return CDRF_DODEFAULT;
+        }
+        let index = cd.nmcd.item_spec as usize;
+        let is_current = self.phase == Phase::Upgrading && self.current_index == Some(index);
+        if stage & CDDS_SUBITEM != 0 {
+            if is_current {
+                cd.clr_text_bk = rgb(205, 230, 255);
+            }
+            if cd.i_sub_item == 4 {
+                match self.results.get(index).copied().unwrap_or(0) {
+                    1 => cd.clr_text = rgb(0, 128, 0),
+                    2 => cd.clr_text = rgb(200, 0, 0),
+                    3 => cd.clr_text = rgb(110, 110, 110),
+                    _ => {}
                 }
             }
+            return CDRF_NEWFONT;
         }
-        let _ = code;
+        if is_current {
+            cd.clr_text_bk = rgb(205, 230, 255);
+        }
+        CDRF_NOTIFYSUBITEMDRAW | CDRF_NEWFONT
     }
 
     fn on_close(&mut self) -> CloseDecision {
@@ -1634,6 +1855,7 @@ impl App {
                     app.btn_upgrade,
                     app.btn_back,
                 ],
+                Phase::Upgrading => vec![app.list],
                 _ => Vec::new(),
             };
             let enabled: Vec<HWND> = candidates
@@ -1677,8 +1899,9 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam:
             0
         }
         WM_NOTIFY => {
-            with_app(|app| app.on_notify(lparam));
-            0
+            let mut result: LRESULT = 0;
+            with_app(|app| result = app.on_notify(lparam));
+            result
         }
         WM_TIMER => {
             let mut messages = Vec::new();
@@ -1690,6 +1913,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam:
                     message_box(hwnd, &text, MB_OK | MB_ICONINFORMATION);
                 }
             }
+            with_app(|app| app.tick_upgrade_status());
             0
         }
         WM_CLOSE => {
@@ -1763,7 +1987,7 @@ fn main() {
         let _ = SetProcessDPIAware();
         let icc = INITCOMMONCONTROLEX {
             dw_size: std::mem::size_of::<INITCOMMONCONTROLEX>() as DWORD,
-            dw_icc: ICC_LISTVIEW_CLASSES,
+            dw_icc: ICC_LISTVIEW_CLASSES | ICC_PROGRESS_CLASS,
         };
         let _ = InitCommonControlsEx(&icc);
 

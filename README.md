@@ -23,12 +23,18 @@
 - **全选 / 全不选**：一键勾选所有或清空勾选
 - **升级选中 (N)**：后台逐个执行
   `winget upgrade --id <ID> --exact --include-unknown --accept-source-agreements --accept-package-agreements --disable-interactivity`
-  界面实时显示进度（状态栏 + “结果”列：成功 / 失败 / 升级中… / 等待中），
-  期间界面保持响应，可继续查看
-- **返回**（或 Esc）：回到初始界面
+- 升级过程中：
+  - 顶部状态栏显示「正在升级 x/N（成功 a · 失败 b · 已用 Ns）：<软件名>」，
+    耗时秒数会持续刷新，方便判断当前包是否仍在处理中
+  - 状态栏下方显示**进度条**，直观反映已完成比例
+  - **列表不再锁死**：可以正常上下滚动、选中行查看；只有**勾选会被锁定**
+    （此期间点击复选框/按空格会自动还原，保证本次升级范围不会被误改）
+  - **正在升级的行以浅蓝色背景高亮**，并自动滚动到可视区域；
+    “结果”列中 **成功=绿色 / 失败=红色 / 等待中=灰色**
+- **返回**（或 Esc）：回到初始界面（升级期间该按钮不可用）
 - 一轮升级结束后弹出汇总（成功/失败数量，失败项及原因），然后**自动回到初始界面**
 
-小提示：窗口内按 Tab 切换焦点、Esc 返回，初始界面按 Enter 激活“查看升级”。
+小提示：窗口内按 Tab 切换焦点、Esc 返回，初始界面按 Enter 激活“查看升级”；升级期间可用方向键/滚动条浏览列表。
 
 ## 运行
 
@@ -101,6 +107,13 @@ cargo test --release
   1 次列表 + 47 次 `winget upgrade --id ... --exact ...`，进度、成功/失败标记、
   结束汇总（含失败项）与“一轮后回到初始界面”均符合预期（截图 `screens/04_upgrading.png`、
   `screens/05_summary.png`）。
+- **升级过程 UI**（`tools/gui_test_progress.ps1` 自动验证，截图 `screens-progress/30_upgrading_scrollable.png`、
+  `screens-progress/31_autoscroll_progress.png`）：
+  - 列表仍可滚动（升级中发送滚动消息后 top index 0→3）；
+  - 勾选被锁定（升级中按空格尝试取消勾选，状态自动还原）；
+  - 当前行自动滚入可视区（升级到第 30 项时 top index=12）并以浅蓝背景高亮；
+  - “结果”列颜色正确：成功=绿色、失败=红色、等待中=灰色（像素采样验证）；
+  - 进度条与“已用 Ns”计时正常刷新。
 - **退出按钮**：点击后立即退出，未启动任何 winget 进程。
 - 真实升级未在测试中执行（避免未经许可改动本机软件），但升级命令的构造与调用已由假 winget 验证。
 
@@ -115,16 +128,19 @@ winget-picker/
 ├── testdata/winget_upgrade_zh.txt   # 真实 winget 输出样本（解析回归测试用）
 ├── fake-winget/           # 测试用假 winget（源码 + 输出样本；测试前编译出 winget.exe）
 ├── tools/
-│   ├── gui_test.ps1       # 用假 winget 跑完整升级流程的自动化测试
-│   └── gui_verify.ps1     # 真实 winget 的界面/列表自动化验证
+│   ├── gui_test.ps1          # 用假 winget 跑完整升级流程的自动化测试
+│   ├── gui_test_progress.ps1 # 升级过程 UI 回归（可滚动/勾选锁定/自动跟随）
+│   └── gui_verify.ps1        # 真实 winget 的界面/列表自动化验证
 ├── screens/               # 假 winget 全流程截图
 ├── screens-real/          # 真实 winget 列表截图
+├── screens-progress/      # 升级过程 UI（滚动/高亮/进度）截图
 └── dist/                  # 本地发布副本目录（构建产物，不提交；可发 GitHub Releases）
 ```
 
 > 测试相关说明：`target/`、`dist/`、`fake-winget/winget.exe` 等构建产物不纳入版本库。
-> 运行 `tools/gui_test.ps1` 前，先编译假 winget：
+> 运行 GUI 自动化测试前，先编译假 winget：
 > `rustc -O -o fake-winget\winget.exe fake-winget\fake_winget.rs`
+> 注意：GUI 测试脚本会调用 `Start-Process`，请把 exe 放在普通目录运行（见上文“运行”一节的环境提示）。
 
 ## 已知限制
 
