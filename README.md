@@ -2,7 +2,6 @@
 
 一个 Windows 小工具：列出 `winget upgrade` 检测到的可更新软件，勾选你想升级的那些，后台逐个升级。
 
-<<<<<<< HEAD
 `winget upgrade --all` 会把列表里的程序全部升掉。这个工具把选择权收回来：先看列表，勾你要的，再升级，没勾的软件不会被动到。
 
 Rust 编写，原生 Win32 界面，零第三方依赖。当前版本 0.2.0，发布版约 339 KiB（346,624 字节），双击 `winget-picker.exe` 即可使用。
@@ -105,7 +104,7 @@ silent=0
 ## 运行
 
 1. 双击 `winget-picker.exe`。
-2. 放在桌面、`C:\Tools`、Program Files 等普通目录均可。
+2. 放在桌面或其他普通目录均可。
 3. Windows 10/11，需要系统自带的 `winget`（应用安装程序 App Installer）。
 
 如果从受限目录（某些沙箱或同步盘）启动，winget 的 AppX 执行别名可能拒绝激活。换到普通目录运行即可。
@@ -235,7 +234,7 @@ winget-picker/
 
 Code by Deepseek v4.1 Flash (1017)
 
-项目主页与问题反馈：<https://github.com/lattemint/winget-picker/>
+项目主页与问题反馈：<https://github.com/lattemint/winget-picker/issue>
 
 ## License
 
