@@ -2232,21 +2232,65 @@ impl App {
                 );
             }
         }
+        // 清单界面底部动作按钮：统一 150×32
+        let list_btn_w = s(150);
+        let list_btn_gap = s(8);
+        let list_x = s(16);
         let btn_all = make_child(
-            hwnd, instance, &class_button, lang::t().all,
-            BS_PUSHBUTTON | WS_TABSTOP, 0, s(16), s(472), s(100), s(32), ID_ALL, font,
+            hwnd,
+            instance,
+            &class_button,
+            lang::t().all,
+            BS_PUSHBUTTON | WS_TABSTOP,
+            0,
+            list_x,
+            s(472),
+            list_btn_w,
+            s(32),
+            ID_ALL,
+            font,
         );
         let btn_none = make_child(
-            hwnd, instance, &class_button, lang::t().none,
-            BS_PUSHBUTTON | WS_TABSTOP, 0, s(124), s(472), s(110), s(32), ID_NONE, font,
+            hwnd,
+            instance,
+            &class_button,
+            lang::t().none,
+            BS_PUSHBUTTON | WS_TABSTOP,
+            0,
+            list_x + list_btn_w + list_btn_gap,
+            s(472),
+            list_btn_w,
+            s(32),
+            ID_NONE,
+            font,
         );
         let btn_upgrade = make_child(
-            hwnd, instance, &class_button, &lang::tpl(lang::t().upgrade_button, &[("n", "0")]),
-            BS_PUSHBUTTON | WS_TABSTOP, 0, s(242), s(472), s(170), s(32), ID_UPGRADE, font,
+            hwnd,
+            instance,
+            &class_button,
+            &lang::tpl(lang::t().upgrade_button, &[("n", "0")]),
+            BS_PUSHBUTTON | WS_TABSTOP,
+            0,
+            list_x + (list_btn_w + list_btn_gap) * 2,
+            s(472),
+            list_btn_w,
+            s(32),
+            ID_UPGRADE,
+            font,
         );
         let btn_back = make_child(
-            hwnd, instance, &class_button, lang::t().back,
-            BS_PUSHBUTTON | WS_TABSTOP, 0, s(704), s(472), s(100), s(32), ID_BACK, font,
+            hwnd,
+            instance,
+            &class_button,
+            lang::t().back,
+            BS_PUSHBUTTON | WS_TABSTOP,
+            0,
+            s(804) - list_btn_w,
+            s(472),
+            list_btn_w,
+            s(32),
+            ID_BACK,
+            font,
         );
 
         // 设置区：2×2 表格。设置按钮统一 80×26，标签右对齐并与按钮保持 8px 间距。
