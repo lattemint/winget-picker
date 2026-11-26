@@ -1,6 +1,6 @@
 [package]
 name = "winget-picker"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "小型 winget 选择性升级工具（零第三方依赖，纯 Win32）"
 

@@ -16,6 +16,9 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::thread;
 
+mod config;
+mod theme;
+
 // ---------------------------------------------------------------- Win32 类型
 
 type HWND = *mut c_void;
@@ -28,6 +31,8 @@ type HFONT = *mut c_void;
 type HGDIOBJ = *mut c_void;
 type HDC = *mut c_void;
 type HMODULE = *mut c_void;
+type HIMAGELIST = *mut c_void;
+type HBITMAP = *mut c_void;
 type WPARAM = usize;
 type LPARAM = isize;
 type LRESULT = isize;
@@ -225,6 +230,53 @@ struct NMLVCUSTOMDRAW {
 }
 zero_default!(NMLVCUSTOMDRAW);
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct PAINTSTRUCT {
+    hdc: HDC,
+    f_erase: BOOL,
+    rc_paint: RECT,
+    f_restore: BOOL,
+    f_inc_update: BOOL,
+    rgb_reserved: [u8; 32],
+}
+zero_default!(PAINTSTRUCT);
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct TRACKMOUSEEVENT {
+    cb_size: DWORD,
+    dw_flags: DWORD,
+    hwnd_track: HWND,
+    dw_hover_time: DWORD,
+}
+zero_default!(TRACKMOUSEEVENT);
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct BITMAPINFOHEADER {
+    bi_size: DWORD,
+    bi_width: i32,
+    bi_height: i32,
+    bi_planes: u16,
+    bi_bit_count: u16,
+    bi_compression: DWORD,
+    bi_size_image: DWORD,
+    bi_x_pels_per_meter: i32,
+    bi_y_pels_per_meter: i32,
+    bi_clr_used: DWORD,
+    bi_clr_important: DWORD,
+}
+zero_default!(BITMAPINFOHEADER);
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct BITMAPINFO {
+    bmi_header: BITMAPINFOHEADER,
+    bmi_colors: [u32; 1],
+}
+zero_default!(BITMAPINFO);
+
 // ---------------------------------------------------------------- Win32 常量
 
 const WM_DESTROY: UINT = 0x0002;
@@ -314,6 +366,9 @@ const VK_TAB: u16 = 9;
 const VK_ESCAPE: u16 = 27;
 const VK_SHIFT: i32 = 0x10;
 
+/// 列表列标题（后续 i18n 时改为按语言取）
+const COLUMN_TITLES: [&str; 5] = ["名称", "当前版本", "可用版本", "ID", "结果"];
+
 const MB_OK: UINT = 0x0000_0000;
 const MB_ICONINFORMATION: UINT = 0x0000_0040;
 const MB_ICONWARNING: UINT = 0x0000_0030;
@@ -333,6 +388,51 @@ const ID_SUBTITLE: i32 = 1008;
 const ID_STATUS: i32 = 1009;
 const ID_LIST: i32 = 1010;
 const ID_PROGRESS: i32 = 1011;
+const ID_THEME_LABEL: i32 = 1012;
+const ID_THEME_BASE: i32 = 1020; // 1020..=1024：5 个主题按钮
+
+// 自绘控件相关
+const WM_PAINT: UINT = 0x000F;
+const WM_ERASEBKGND: UINT = 0x0014;
+const WM_MOUSEMOVE: UINT = 0x0200;
+const WM_LBUTTONDOWN: UINT = 0x0201;
+const WM_LBUTTONUP: UINT = 0x0202;
+const WM_CAPTURECHANGED: UINT = 0x0215;
+const WM_MOUSELEAVE: UINT = 0x02A3;
+const WM_ENABLE: UINT = 0x000A;
+const WM_SETFOCUS: UINT = 0x0007;
+const WM_KILLFOCUS: UINT = 0x0008;
+const WM_GETFONT: UINT = 0x0031;
+const WM_SETTEXT: UINT = 0x000C;
+const BN_CLICKED: UINT = 0;
+const VK_RETURN: u16 = 13;
+const VK_SPACE: u16 = 32;
+const DT_CENTER: UINT = 0x0001;
+const DT_VCENTER: UINT = 0x0004;
+const DT_SINGLELINE: UINT = 0x0020;
+const TME_LEAVE: u32 = 0x0000_0002;
+const GWLP_ID: i32 = -12;
+const LVS_NOCOLUMNHEADER: DWORD = 0x4000;
+
+// ListView 颜色/表头/网格线
+const LVM_SETBKCOLOR: UINT = LVM_FIRST + 1;
+const LVM_SETIMAGELIST: UINT = LVM_FIRST + 2;
+const LVM_GETITEMRECT: UINT = LVM_FIRST + 14;
+const LVM_SETTEXTCOLOR: UINT = LVM_FIRST + 36;
+const LVM_SETTEXTBKCOLOR: UINT = LVM_FIRST + 38;
+const LVM_GETTOPINDEX: UINT = LVM_FIRST + 39;
+const LVSIL_STATE: WPARAM = 2;
+const CDDS_POSTPAINT: UINT = 0x0000_0002;
+
+// 经典进度条上色
+const PBM_SETBARCOLOR: UINT = 0x0400 + 9;
+const PBM_SETBKCOLOR: UINT = 0x2001;
+
+// 自绘按钮状态位（存于窗口类额外内存 offset 0）
+const BTN_HOT: isize = 1;
+const BTN_PRESSED: isize = 2;
+const BTN_SELECTED: isize = 4;
+const BTN_FONT_OFFSET: i32 = 8;
 
 // ---------------------------------------------------------------- Win32 导入
 
@@ -382,6 +482,20 @@ unsafe extern "system" {
     fn GetSysColor(index: i32) -> DWORD;
     fn GetSysColorBrush(index: i32) -> HBRUSH;
     fn InvalidateRect(hwnd: HWND, rect: *const RECT, erase: BOOL) -> BOOL;
+    fn GetClientRect(hwnd: HWND, rect: *mut RECT) -> BOOL;
+    fn GetWindowTextW(hwnd: HWND, text: LPWSTR, max: i32) -> i32;
+    fn GetWindowLongPtrW(hwnd: HWND, index: i32) -> isize;
+    fn SetWindowLongPtrW(hwnd: HWND, index: i32, value: isize) -> isize;
+    fn GetParent(hwnd: HWND) -> HWND;
+    fn GetCapture() -> HWND;
+    fn SetCapture(hwnd: HWND) -> HWND;
+    fn ReleaseCapture() -> BOOL;
+    fn DrawTextW(hdc: HDC, text: LPCWSTR, len: i32, rect: *mut RECT, flags: UINT) -> i32;
+    fn BeginPaint(hwnd: HWND, ps: *mut PAINTSTRUCT) -> HDC;
+    fn EndPaint(hwnd: HWND, ps: *const PAINTSTRUCT) -> BOOL;
+    fn DrawFocusRect(hdc: HDC, rect: *const RECT) -> BOOL;
+    fn TrackMouseEvent(event: *mut TRACKMOUSEEVENT) -> BOOL;
+    fn GetDlgCtrlID(hwnd: HWND) -> i32;
 }
 
 #[link(name = "gdi32")]
@@ -390,6 +504,20 @@ unsafe extern "system" {
     fn DeleteObject(obj: HGDIOBJ) -> BOOL;
     fn GetDeviceCaps(dc: HDC, index: i32) -> i32;
     fn SetBkMode(dc: HDC, mode: i32) -> i32;
+    fn SetTextColor(dc: HDC, color: u32) -> u32;
+    fn SetBkColor(dc: HDC, color: u32) -> u32;
+    fn CreateSolidBrush(color: u32) -> HBRUSH;
+    fn FillRect(dc: HDC, rect: *const RECT, brush: HBRUSH) -> i32;
+    fn GetStockObject(index: i32) -> HGDIOBJ;
+    fn SelectObject(dc: HDC, obj: HGDIOBJ) -> HGDIOBJ;
+    fn CreateDIBSection(
+        dc: HDC,
+        bmi: *const BITMAPINFO,
+        usage: UINT,
+        bits: *mut *mut c_void,
+        section: *mut c_void,
+        offset: DWORD,
+    ) -> HBITMAP;
 }
 
 #[link(name = "kernel32")]
@@ -405,11 +533,16 @@ unsafe extern "system" {
     ) -> i32;
     fn AllocConsole() -> BOOL;
     fn GetConsoleWindow() -> HWND;
+    fn LoadLibraryW(name: LPCWSTR) -> HMODULE;
+    fn GetProcAddress(module: HMODULE, name: *const u8) -> *mut c_void;
 }
 
 #[link(name = "comctl32")]
 unsafe extern "system" {
     fn InitCommonControlsEx(icc: *const INITCOMMONCONTROLEX) -> BOOL;
+    fn ImageList_Create(cx: i32, cy: i32, flags: UINT, initial: i32, grow: i32) -> HIMAGELIST;
+    fn ImageList_Add(list: HIMAGELIST, bitmap: HBITMAP, mask: HBITMAP) -> i32;
+    fn ImageList_Destroy(list: HIMAGELIST) -> BOOL;
 }
 
 // 修正：comctl32 的初始化结构体名
@@ -466,6 +599,358 @@ fn message_box_ex(owner: HWND, text: &str, flags: UINT) -> i32 {
     let t = wide(text);
     let c = wide("winget 选择性更新");
     unsafe { MessageBoxW(owner, t.as_ptr(), c.as_ptr(), flags) }
+}
+
+// ---------------------------------------------------------------- 主题绘制辅助
+
+static mut UI_BRUSH_BG: HBRUSH = std::ptr::null_mut();
+static mut UI_FONT: HFONT = std::ptr::null_mut();
+
+fn ui_brush_bg() -> HBRUSH {
+    unsafe { UI_BRUSH_BG }
+}
+
+/// 动态加载 DLL 函数（DWM 暗色标题栏 / 经典控件主题）。
+unsafe fn dyn_load(dll: &str, func: &str) -> *mut c_void {
+    let module = LoadLibraryW(wide(dll).as_ptr());
+    if module.is_null() {
+        return std::ptr::null_mut();
+    }
+    let name = format!("{}\0", func);
+    GetProcAddress(module, name.as_ptr() as *const u8)
+}
+
+unsafe fn set_dark_titlebar(hwnd: HWND, dark: bool) {
+    type Fn = unsafe extern "system" fn(HWND, u32, *const c_void, u32) -> i32;
+    let addr = dyn_load("dwmapi.dll", "DwmSetWindowAttribute");
+    if addr.is_null() {
+        return;
+    }
+    let f: Fn = std::mem::transmute(addr);
+    let value: i32 = dark as i32;
+    // 20 = DWMWA_USE_IMMERSIVE_DARK_MODE（Win10 2004+）；19 为旧版本属性
+    f(hwnd, 20, &value as *const i32 as *const c_void, 4);
+    f(hwnd, 19, &value as *const i32 as *const c_void, 4);
+}
+
+unsafe fn set_classic_theme(hwnd: HWND) {
+    type Fn = unsafe extern "system" fn(HWND, *const u16, *const u16) -> i32;
+    let addr = dyn_load("uxtheme.dll", "SetWindowTheme");
+    if addr.is_null() {
+        return;
+    }
+    let f: Fn = std::mem::transmute(addr);
+    let empty = wide("");
+    f(hwnd, empty.as_ptr(), empty.as_ptr());
+}
+
+fn color_luma(color: u32) -> f32 {
+    let r = (color & 0xFF) as f32;
+    let g = ((color >> 8) & 0xFF) as f32;
+    let b = ((color >> 16) & 0xFF) as f32;
+    0.299 * r + 0.587 * g + 0.114 * b
+}
+
+/// 生成 16x16 自定义勾选框图片：0=空白，1=未勾选，2=勾选。
+unsafe fn make_state_bitmap(th: &theme::Theme, kind: u8) -> HBITMAP {
+    let screen = GetDC(std::ptr::null_mut());
+    let bmi = BITMAPINFO {
+        bmi_header: BITMAPINFOHEADER {
+            bi_size: std::mem::size_of::<BITMAPINFOHEADER>() as DWORD,
+            bi_width: 16,
+            bi_height: -16,
+            bi_planes: 1,
+            bi_bit_count: 32,
+            bi_compression: 0,
+            bi_size_image: 16 * 16 * 4,
+            bi_x_pels_per_meter: 0,
+            bi_y_pels_per_meter: 0,
+            bi_clr_used: 0,
+            bi_clr_important: 0,
+        },
+        bmi_colors: [0],
+    };
+    let mut bits: *mut c_void = std::ptr::null_mut();
+    let dib = CreateDIBSection(screen, &bmi, 0, &mut bits, std::ptr::null_mut(), 0);
+    ReleaseDC(std::ptr::null_mut(), screen);
+    if dib.is_null() || bits.is_null() {
+        return std::ptr::null_mut();
+    }
+    let px = bits as *mut u32;
+    let bg = 0xFF00_0000u32 | th.list_bg;
+    for i in 0..256 {
+        px.add(i).write(bg);
+    }
+    match kind {
+        1 => {
+            let border = 0xFF00_0000u32 | th.muted;
+            for i in 2..=13 {
+                px.add(2 * 16 + i).write(border);
+                px.add(13 * 16 + i).write(border);
+                px.add(i * 16 + 2).write(border);
+                px.add(i * 16 + 13).write(border);
+            }
+        }
+        2 => {
+            let fill = 0xFF00_0000u32 | th.accent;
+            for y in 2..=13 {
+                for x in 2..=13 {
+                    px.add(y * 16 + x).write(fill);
+                }
+            }
+            let check = if color_luma(th.accent) > 150.0 {
+                0xFF00_0000u32 | th.bg
+            } else {
+                0xFFFF_FFFFu32
+            };
+            let pts = [
+                (4usize, 8usize),
+                (5, 9),
+                (6, 10),
+                (7, 9),
+                (8, 8),
+                (9, 7),
+                (10, 6),
+                (11, 5),
+            ];
+            for &(x, y) in pts.iter() {
+                px.add(y * 16 + x).write(check);
+                if y + 1 < 16 {
+                    px.add((y + 1) * 16 + x).write(check);
+                }
+            }
+        }
+        _ => {}
+    }
+    dib
+}
+
+unsafe fn make_state_images(th: &theme::Theme) -> HIMAGELIST {
+    let list = ImageList_Create(16, 16, 0x0000_0020, 3, 1); // ILC_COLOR32
+    if list.is_null() {
+        return list;
+    }
+    for kind in [0u8, 1, 2] {
+        let bmp = make_state_bitmap(th, kind);
+        if !bmp.is_null() {
+            ImageList_Add(list, bmp, std::ptr::null_mut());
+            DeleteObject(bmp as HGDIOBJ);
+        }
+    }
+    list
+}
+
+unsafe fn button_notify(hwnd: HWND) {
+    let parent = GetParent(hwnd);
+    if parent.is_null() {
+        return;
+    }
+    let id = GetDlgCtrlID(hwnd) as usize;
+    SendMessageW(parent, WM_COMMAND, id, hwnd as LPARAM);
+}
+
+unsafe fn button_paint(hwnd: HWND) {
+    let th = *theme::active();
+    let mut ps: PAINTSTRUCT = std::mem::zeroed();
+    let hdc = BeginPaint(hwnd, &mut ps);
+    let mut rc: RECT = std::mem::zeroed();
+    GetClientRect(hwnd, &mut rc);
+
+    let state = GetWindowLongPtrW(hwnd, 0);
+    let enabled = IsWindowEnabled(hwnd) != 0;
+    let selected = state & BTN_SELECTED != 0;
+    let pressed = state & BTN_PRESSED != 0;
+    let hot = state & BTN_HOT != 0;
+
+    let bg = if !enabled {
+        th.btn_bg
+    } else if selected {
+        th.accent_soft
+    } else if pressed {
+        th.btn_pressed
+    } else if hot {
+        th.btn_hover
+    } else {
+        th.btn_bg
+    };
+    let fg = if !enabled {
+        th.btn_disabled_text
+    } else if selected {
+        th.accent
+    } else {
+        th.btn_text
+    };
+    let border = if selected { th.accent } else { th.border };
+
+    let brush = CreateSolidBrush(bg);
+    FillRect(hdc, &rc, brush);
+    DeleteObject(brush as HGDIOBJ);
+
+    let border_brush = CreateSolidBrush(border);
+    let lines = [
+        RECT { left: 0, top: 0, right: rc.right, bottom: 1 },
+        RECT { left: 0, top: rc.bottom - 1, right: rc.right, bottom: rc.bottom },
+        RECT { left: 0, top: 0, right: 1, bottom: rc.bottom },
+        RECT { left: rc.right - 1, top: 0, right: rc.right, bottom: rc.bottom },
+    ];
+    for line in lines.iter() {
+        FillRect(hdc, line, border_brush);
+    }
+    DeleteObject(border_brush as HGDIOBJ);
+
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, fg);
+    let font = GetWindowLongPtrW(hwnd, BTN_FONT_OFFSET) as HFONT;
+    if !font.is_null() {
+        SelectObject(hdc, font as HGDIOBJ);
+    }
+    let mut buf = [0u16; 256];
+    let n = GetWindowTextW(hwnd, buf.as_mut_ptr(), 256);
+    if n > 0 {
+        let mut tr = rc;
+        tr.left += 6;
+        tr.right -= 6;
+        DrawTextW(hdc, buf.as_ptr(), n, &mut tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    }
+    if GetFocus() == hwnd {
+        let mut fr = rc;
+        fr.left += 3;
+        fr.top += 3;
+        fr.right -= 3;
+        fr.bottom -= 3;
+        DrawFocusRect(hdc, &fr);
+    }
+    EndPaint(hwnd, &ps);
+}
+
+unsafe extern "system" fn button_proc(
+    hwnd: HWND,
+    msg: UINT,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    let mut state = GetWindowLongPtrW(hwnd, 0);
+    match msg {
+        WM_ERASEBKGND => 1,
+        WM_PAINT => {
+            button_paint(hwnd);
+            0
+        }
+        WM_SETFONT => {
+            SetWindowLongPtrW(hwnd, BTN_FONT_OFFSET, wparam as isize);
+            InvalidateRect(hwnd, std::ptr::null(), 1);
+            0
+        }
+        WM_GETFONT => GetWindowLongPtrW(hwnd, BTN_FONT_OFFSET),
+        WM_SETTEXT => {
+            let r = DefWindowProcW(hwnd, msg, wparam, lparam);
+            InvalidateRect(hwnd, std::ptr::null(), 1);
+            r
+        }
+        WM_ENABLE => {
+            InvalidateRect(hwnd, std::ptr::null(), 1);
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
+        WM_MOUSEMOVE => {
+            if state & BTN_HOT == 0 {
+                state |= BTN_HOT;
+                SetWindowLongPtrW(hwnd, 0, state);
+                let mut tme: TRACKMOUSEEVENT = std::mem::zeroed();
+                tme.cb_size = std::mem::size_of::<TRACKMOUSEEVENT>() as DWORD;
+                tme.dw_flags = TME_LEAVE;
+                tme.hwnd_track = hwnd;
+                TrackMouseEvent(&mut tme);
+                InvalidateRect(hwnd, std::ptr::null(), 1);
+            }
+            0
+        }
+        WM_MOUSELEAVE => {
+            state &= !BTN_HOT;
+            SetWindowLongPtrW(hwnd, 0, state);
+            InvalidateRect(hwnd, std::ptr::null(), 1);
+            0
+        }
+        WM_LBUTTONDOWN => {
+            state |= BTN_PRESSED;
+            SetWindowLongPtrW(hwnd, 0, state);
+            SetCapture(hwnd);
+            SetFocus(hwnd);
+            InvalidateRect(hwnd, std::ptr::null(), 1);
+            0
+        }
+        WM_LBUTTONUP => {
+            let was_pressed = state & BTN_PRESSED != 0;
+            state &= !BTN_PRESSED;
+            SetWindowLongPtrW(hwnd, 0, state);
+            if GetCapture() == hwnd {
+                ReleaseCapture();
+            }
+            if was_pressed {
+                let mut rc: RECT = std::mem::zeroed();
+                GetClientRect(hwnd, &mut rc);
+                let x = (lparam & 0xFFFF) as i16 as i32;
+                let y = ((lparam >> 16) & 0xFFFF) as i16 as i32;
+                if x >= 0 && y >= 0 && x < rc.right && y < rc.bottom {
+                    button_notify(hwnd);
+                }
+            }
+            InvalidateRect(hwnd, std::ptr::null(), 1);
+            0
+        }
+        WM_CAPTURECHANGED => {
+            state &= !BTN_PRESSED;
+            SetWindowLongPtrW(hwnd, 0, state);
+            InvalidateRect(hwnd, std::ptr::null(), 1);
+            0
+        }
+        WM_KEYDOWN => {
+            let vk = wparam as u16;
+            if vk == VK_SPACE || vk == VK_RETURN {
+                button_notify(hwnd);
+                0
+            } else {
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
+        }
+        WM_SETFOCUS | WM_KILLFOCUS => {
+            InvalidateRect(hwnd, std::ptr::null(), 1);
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
+        _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+    }
+}
+
+unsafe fn set_button_selected(hwnd: HWND, on: bool) {
+    if hwnd.is_null() {
+        return;
+    }
+    let mut state = GetWindowLongPtrW(hwnd, 0);
+    if on {
+        state |= BTN_SELECTED;
+    } else {
+        state &= !BTN_SELECTED;
+    }
+    SetWindowLongPtrW(hwnd, 0, state);
+    InvalidateRect(hwnd, std::ptr::null(), 1);
+}
+
+unsafe fn register_control_classes(instance: HINSTANCE) {
+    let class = wide("WPButton");
+    let wc = WNDCLASSEXW {
+        cb_size: std::mem::size_of::<WNDCLASSEXW>() as UINT,
+        style: 0,
+        lpfn_wnd_proc: Some(button_proc),
+        cb_cls_extra: 0,
+        cb_wnd_extra: 16,
+        h_instance: instance,
+        h_icon: std::ptr::null_mut(),
+        h_cursor: LoadCursorW(std::ptr::null_mut(), 32512usize as LPCWSTR),
+        hbr_background: std::ptr::null_mut(),
+        lpsz_menu_name: std::ptr::null(),
+        lpsz_class_name: class.as_ptr(),
+        h_icon_sm: std::ptr::null_mut(),
+    };
+    RegisterClassExW(&wc);
 }
 
 // ---------------------------------------------------------------- 数据模型
@@ -1055,6 +1540,8 @@ struct App {
     btn_none: HWND,
     btn_upgrade: HWND,
     btn_back: HWND,
+    theme_label: HWND,
+    theme_btns: [HWND; 5],
     phase: Phase,
     items: Vec<Item>,
     tx: Sender<TaskMsg>,
@@ -1074,6 +1561,14 @@ struct App {
     current_n: usize,
     current_start: Option<std::time::Instant>,
     last_status_tick: Option<std::time::Instant>,
+    font: HFONT,
+    theme_choice: theme::Choice,
+    config: config::Config,
+    col_w: [i32; 5],
+    head_pad: i32,
+    header_rect: RECT,
+    list_rect: RECT,
+    state_images: HIMAGELIST,
 }
 
 unsafe fn make_child(
@@ -1112,7 +1607,7 @@ unsafe fn make_child(
 }
 
 impl App {
-    unsafe fn new(hwnd: HWND) -> Box<App> {
+    unsafe fn new(hwnd: HWND, cfg: config::Config) -> Box<App> {
         // DPI
         let mut dpi: i32 = 96;
         let screen_dc = GetDC(std::ptr::null_mut());
@@ -1142,8 +1637,9 @@ impl App {
 
         let instance = GetModuleHandleW(std::ptr::null());
         let class_static = wide("STATIC");
-        let class_button = wide("BUTTON");
+        let class_button = wide("WPButton");
         let class_list = wide("SysListView32");
+        UI_FONT = font;
 
         // 初始界面
         let title = make_child(
@@ -1173,27 +1669,50 @@ impl App {
             hwnd, instance, &class_progress, "",
             PBS_SMOOTH, 0, s(16), s(36), s(788), s(12), ID_PROGRESS, font,
         );
+        // 清单区域：自绘表头 + 无边框 ListView（边框由主窗口绘制，颜色跟随主题）
+        let header_rect = RECT {
+            left: s(16),
+            top: s(52),
+            right: s(16) + s(788),
+            bottom: s(52) + s(27),
+        };
+        let list_rect = RECT {
+            left: s(16),
+            top: s(79),
+            right: s(16) + s(788),
+            bottom: s(79) + s(385),
+        };
+        let list_w = list_rect.right - list_rect.left;
+        let fixed_w = s(105) + s(105) + s(70);
+        let remain = (list_w - fixed_w).max(s(240));
+        let name_w = remain * 60 / 100;
+        let id_w = remain - name_w;
+        let col_w = [name_w, s(105), s(105), id_w, s(70)];
+
         let list = make_child(
-            hwnd, instance, &class_list, "",
-            LVS_REPORT | LVS_SHOWSELALWAYS | WS_TABSTOP,
-            WS_EX_CLIENTEDGE, s(16), s(52), s(788), s(412), ID_LIST, font,
+            hwnd,
+            instance,
+            &class_list,
+            "",
+            LVS_REPORT | LVS_SHOWSELALWAYS | LVS_NOCOLUMNHEADER,
+            0,
+            list_rect.left,
+            list_rect.top,
+            list_w,
+            list_rect.bottom - list_rect.top,
+            ID_LIST,
+            font,
         );
         if !list.is_null() {
-            let ex_style = (LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_CHECKBOXES | LVS_EX_DOUBLEBUFFER) as LPARAM;
+            let ex_style =
+                (LVS_EX_FULLROWSELECT | LVS_EX_CHECKBOXES | LVS_EX_DOUBLEBUFFER) as LPARAM;
             SendMessageW(list, LVM_SETEXTENDEDLISTVIEWSTYLE, 0, ex_style);
-            let columns: [(&str, i32); 5] = [
-                ("名称", 270),
-                ("当前版本", 105),
-                ("可用版本", 105),
-                ("ID", 195),
-                ("结果", 65),
-            ];
-            for (i, (text, width)) in columns.iter().enumerate() {
-                let t = wide(text);
+            for (i, title) in COLUMN_TITLES.iter().enumerate() {
+                let t = wide(title);
                 let mut col = LVCOLUMNW::default();
                 col.mask = LVCF_FMT | LVCF_WIDTH | LVCF_TEXT | LVCF_SUBITEM;
                 col.fmt = LVCFMT_LEFT;
-                col.cx = s(*width);
+                col.cx = col_w[i];
                 col.psz_text = t.as_ptr();
                 col.cch_text = 0;
                 col.i_sub_item = i as i32;
@@ -1203,10 +1722,6 @@ impl App {
                     i as WPARAM,
                     &mut col as *mut _ as LPARAM,
                 );
-            }
-            let header = SendMessageW(list, LVM_GETHEADER, 0, 0) as HWND;
-            if !header.is_null() {
-                SendMessageW(header, WM_SETFONT, font as WPARAM, 1);
             }
         }
         let btn_all = make_child(
@@ -1226,8 +1741,50 @@ impl App {
             BS_PUSHBUTTON | WS_TABSTOP, 0, s(714), s(472), s(90), s(32), ID_BACK, font,
         );
 
+        // 设置区：主题分段按钮（只在初始界面显示）
+        let theme_widths = [s(84), s(60), s(60), s(86), s(86)];
+        let theme_gap = s(6);
+        let theme_label_w = s(40);
+        let theme_total: i32 =
+            theme_widths.iter().sum::<i32>() + theme_gap * 4 + theme_label_w + s(8);
+        let mut theme_x = (s(820) - theme_total) / 2;
+        let theme_label = make_child(
+            hwnd,
+            instance,
+            &class_static,
+            "主题",
+            SS_LEFT | SS_NOPREFIX,
+            0,
+            theme_x,
+            s(400),
+            theme_label_w,
+            s(26),
+            ID_THEME_LABEL,
+            font,
+        );
+        theme_x += theme_label_w + s(8);
+        let mut theme_btns: [HWND; 5] = [std::ptr::null_mut(); 5];
+        for (i, choice) in theme::CHOICES.iter().enumerate() {
+            theme_btns[i] = make_child(
+                hwnd,
+                instance,
+                &class_button,
+                choice.label_zh(),
+                WS_TABSTOP,
+                0,
+                theme_x,
+                s(400),
+                theme_widths[i],
+                s(26),
+                ID_THEME_BASE + i as i32,
+                font,
+            );
+            theme_x += theme_widths[i] + theme_gap;
+        }
+
         let (tx, rx) = channel();
 
+        let initial_choice = cfg.theme;
         let mut app = Box::new(App {
             hwnd,
             title,
@@ -1241,6 +1798,8 @@ impl App {
             btn_none,
             btn_upgrade,
             btn_back,
+            theme_label,
+            theme_btns,
             phase: Phase::Init,
             items: Vec::new(),
             tx,
@@ -1257,12 +1816,157 @@ impl App {
             current_n: 0,
             current_start: None,
             last_status_tick: None,
+            font,
+            theme_choice: initial_choice,
+            config: cfg,
+            col_w,
+            head_pad: s(22),
+            header_rect,
+            list_rect,
+            state_images: std::ptr::null_mut(),
         });
-        unsafe {
-            SendMessageW(progress, PBM_SETRANGE32, 0, 100);
+        SendMessageW(progress, PBM_SETRANGE32, 0, 100);
+        for (i, btn) in app.theme_btns.iter().enumerate() {
+            set_button_selected(*btn, initial_choice.index() == i);
         }
+        app.apply_theme_visual(initial_choice);
         app.apply_phase();
         app
+    }
+
+    /// 应用主题到所有自绘控件（不写配置）。
+    unsafe fn apply_theme_visual(&mut self, choice: theme::Choice) {
+        self.theme_choice = choice;
+        let idx = choice.resolve_index(theme::system_uses_dark());
+        theme::set_active_index(idx);
+        let th = *theme::active();
+
+        if !ui_brush_bg().is_null() {
+            DeleteObject(ui_brush_bg() as HGDIOBJ);
+        }
+        UI_BRUSH_BG = CreateSolidBrush(th.bg);
+        set_dark_titlebar(self.hwnd, th.dark);
+
+        if !self.list.is_null() {
+            SendMessageW(self.list, LVM_SETBKCOLOR, 0, th.list_bg as LPARAM);
+            SendMessageW(self.list, LVM_SETTEXTCOLOR, 0, th.text as LPARAM);
+            SendMessageW(self.list, LVM_SETTEXTBKCOLOR, 0, th.list_bg as LPARAM);
+            let images = make_state_images(&th);
+            if !images.is_null() {
+                SendMessageW(self.list, LVM_SETIMAGELIST, LVSIL_STATE, images as LPARAM);
+                if !self.state_images.is_null() {
+                    ImageList_Destroy(self.state_images);
+                }
+                self.state_images = images;
+            }
+            self.invalidate_list();
+        }
+
+        if !self.progress.is_null() {
+            set_classic_theme(self.progress);
+            SendMessageW(self.progress, PBM_SETBKCOLOR, 0, th.progress_track as LPARAM);
+            SendMessageW(self.progress, PBM_SETBARCOLOR, 0, th.accent as LPARAM);
+        }
+
+        for (i, btn) in self.theme_btns.iter().enumerate() {
+            set_button_selected(*btn, choice.index() == i);
+        }
+
+        InvalidateRect(self.hwnd, std::ptr::null(), 1);
+        let repaint = [
+            self.title,
+            self.subtitle,
+            self.status,
+            self.theme_label,
+            self.btn_view,
+            self.btn_exit,
+            self.btn_all,
+            self.btn_none,
+            self.btn_upgrade,
+            self.btn_back,
+        ];
+        for h in repaint {
+            if !h.is_null() {
+                InvalidateRect(h, std::ptr::null(), 1);
+            }
+        }
+        self.config.theme = choice;
+    }
+
+    /// 用户切换主题：应用 + 写配置。
+    fn set_theme(&mut self, choice: theme::Choice) {
+        unsafe {
+            self.apply_theme_visual(choice);
+        }
+        self.config.save();
+    }
+
+    /// 主窗口客户区绘制：自绘表头 + ListView 边框。
+    unsafe fn paint(&self, hdc: HDC) {
+        if self.phase == Phase::Init {
+            return;
+        }
+        let th = *theme::active();
+        let hr = self.header_rect;
+
+        let header_bg = CreateSolidBrush(th.header_bg);
+        FillRect(hdc, &hr, header_bg);
+        DeleteObject(header_bg as HGDIOBJ);
+
+        let border = CreateSolidBrush(th.border);
+        let header_bottom = RECT {
+            left: hr.left,
+            top: hr.bottom - 1,
+            right: hr.right,
+            bottom: hr.bottom,
+        };
+        FillRect(hdc, &header_bottom, border);
+
+        SetBkMode(hdc, TRANSPARENT);
+        SetTextColor(hdc, th.muted);
+        SelectObject(hdc, self.font as HGDIOBJ);
+        let mut x = hr.left;
+        for (i, title) in COLUMN_TITLES.iter().enumerate() {
+            let w = self.col_w[i];
+            let left_pad = if i == 0 { self.head_pad } else { 0 };
+            let mut tr = RECT {
+                left: x + 10 + left_pad,
+                top: hr.top,
+                right: x + w - 6,
+                bottom: hr.bottom - 1,
+            };
+            let t = wide(title);
+            DrawTextW(
+                hdc,
+                t.as_ptr(),
+                -1,
+                &mut tr,
+                0x0000 | DT_VCENTER | DT_SINGLELINE,
+            );
+            if i + 1 < COLUMN_TITLES.len() {
+                let sep = RECT {
+                    left: x + w - 1,
+                    top: hr.top + 6,
+                    right: x + w,
+                    bottom: hr.bottom - 7,
+                };
+                FillRect(hdc, &sep, border);
+            }
+            x += w;
+        }
+
+        // ListView 外框
+        let lr = self.list_rect;
+        let lines = [
+            RECT { left: lr.left - 1, top: lr.top - 1, right: lr.right + 1, bottom: lr.top },
+            RECT { left: lr.left - 1, top: lr.bottom, right: lr.right + 1, bottom: lr.bottom + 1 },
+            RECT { left: lr.left - 1, top: lr.top - 1, right: lr.left, bottom: lr.bottom + 1 },
+            RECT { left: lr.right, top: lr.top - 1, right: lr.right + 1, bottom: lr.bottom + 1 },
+        ];
+        for line in lines.iter() {
+            FillRect(hdc, line, border);
+        }
+        DeleteObject(border as HGDIOBJ);
     }
 
     fn apply_phase(&mut self) {
@@ -1281,6 +1985,11 @@ impl App {
         show(self.btn_none, !init);
         show(self.btn_upgrade, !init);
         show(self.btn_back, !init);
+        show(self.theme_label, init);
+        for btn in self.theme_btns.iter() {
+            show(*btn, init);
+            enable(*btn, init);
+        }
         // 升级期间列表保持可用：可以滚动/查看进度，只是勾选会被锁定
         enable(self.list, list_mode || upgrading);
         enable(self.btn_all, list_mode);
@@ -1736,6 +2445,13 @@ impl App {
                 self.begin_upgrade(indices);
                 None
             }
+            id if (ID_THEME_BASE..=ID_THEME_BASE + 4).contains(&id) => {
+                let index = (id - ID_THEME_BASE) as usize;
+                if let Some(choice) = theme::Choice::from_index(index) {
+                    self.set_theme(choice);
+                }
+                None
+            }
             _ => None,
         }
     }
@@ -1788,35 +2504,88 @@ impl App {
         }
     }
 
-    /// 行着色：当前行高亮背景；结果列按 成功/失败/等待 着色。
+    /// 行着色：选中/当前行高亮背景；结果列按成功/失败/等待着色；POSTPAINT 阶段自绘分隔线。
     unsafe fn on_custom_draw(&self, lparam: LPARAM) -> LRESULT {
         let cd = &mut *(lparam as *mut NMLVCUSTOMDRAW);
         let stage = cd.nmcd.draw_stage;
+        let th = *theme::active();
         if stage == CDDS_PREPAINT {
             return CDRF_NOTIFYITEMDRAW;
+        }
+        if stage == CDDS_POSTPAINT {
+            // 自绘行/列分隔线（替代系统亮色 gridlines，且只画有数据的行）
+            let list = cd.nmcd.hdr.hwnd_from;
+            let hdc = cd.nmcd.hdc;
+            let count = SendMessageW(list, LVM_GETITEMCOUNT, 0, 0) as usize;
+            let top = SendMessageW(list, LVM_GETTOPINDEX, 0, 0) as usize;
+            let total: i32 = self.col_w.iter().sum();
+            let brush = CreateSolidBrush(th.grid);
+            for i in top..count {
+                let mut rc: RECT = std::mem::zeroed();
+                let ok = SendMessageW(list, LVM_GETITEMRECT, i, &mut rc as *mut _ as LPARAM);
+                if ok == 0 {
+                    continue;
+                }
+                let bottom = RECT {
+                    left: 0,
+                    top: rc.bottom - 1,
+                    right: total,
+                    bottom: rc.bottom,
+                };
+                FillRect(hdc, &bottom, brush);
+                let mut x = 0i32;
+                for w in self.col_w.iter() {
+                    x += *w;
+                    if x >= total {
+                        break;
+                    }
+                    let v = RECT {
+                        left: x - 1,
+                        top: rc.top,
+                        right: x,
+                        bottom: rc.bottom - 1,
+                    };
+                    FillRect(hdc, &v, brush);
+                }
+            }
+            DeleteObject(brush as HGDIOBJ);
+            return CDRF_DODEFAULT;
         }
         if stage & CDDS_ITEMPREPAINT == 0 {
             return CDRF_DODEFAULT;
         }
+
+        let list = cd.nmcd.hdr.hwnd_from;
         let index = cd.nmcd.item_spec as usize;
         let is_current = self.phase == Phase::Upgrading && self.current_index == Some(index);
+        let selected_state = SendMessageW(
+            list,
+            LVM_GETITEMSTATE,
+            index,
+            LVIS_SELECTED as LPARAM,
+        ) as u32;
+        let is_selected = selected_state & LVIS_SELECTED != 0;
+        let row_bg = if is_current || is_selected {
+            th.accent_soft
+        } else {
+            th.list_bg
+        };
+
         if stage & CDDS_SUBITEM != 0 {
-            if is_current {
-                cd.clr_text_bk = rgb(205, 230, 255);
-            }
+            cd.clr_text_bk = row_bg;
+            cd.clr_text = th.text;
             if cd.i_sub_item == 4 {
                 match self.results.get(index).copied().unwrap_or(0) {
-                    1 => cd.clr_text = rgb(0, 128, 0),
-                    2 => cd.clr_text = rgb(200, 0, 0),
-                    3 => cd.clr_text = rgb(110, 110, 110),
+                    1 => cd.clr_text = th.ok,
+                    2 => cd.clr_text = th.err,
+                    3 => cd.clr_text = th.muted,
                     _ => {}
                 }
             }
             return CDRF_NEWFONT;
         }
-        if is_current {
-            cd.clr_text_bk = rgb(205, 230, 255);
-        }
+        cd.clr_text = th.text;
+        cd.clr_text_bk = row_bg;
         CDRF_NOTIFYSUBITEMDRAW | CDRF_NEWFONT
     }
 
@@ -1887,6 +2656,23 @@ impl App {
 
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
+        WM_ERASEBKGND => {
+            let hdc = wparam as HDC;
+            let mut rc: RECT = std::mem::zeroed();
+            GetClientRect(hwnd, &mut rc);
+            let brush = ui_brush_bg();
+            if !brush.is_null() {
+                FillRect(hdc, &rc, brush);
+            }
+            1
+        }
+        WM_PAINT => {
+            let mut ps: PAINTSTRUCT = std::mem::zeroed();
+            let hdc = BeginPaint(hwnd, &mut ps);
+            with_app(|app| app.paint(hdc));
+            EndPaint(hwnd, &ps);
+            0
+        }
         WM_COMMAND => {
             let id = (wparam & 0xFFFF) as i32;
             let mut popup: Option<String> = None;
@@ -1939,9 +2725,17 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam:
         }
         WM_CTLCOLORSTATIC => {
             let hdc = wparam as HDC;
+            let th = *theme::active();
             SetBkMode(hdc, TRANSPARENT);
-            let _ = GetSysColor(COLOR_BTNFACE);
-            GetSysColorBrush(COLOR_BTNFACE) as LRESULT
+            SetBkColor(hdc, th.bg);
+            let id = GetDlgCtrlID(lparam as HWND);
+            let color = if id == ID_SUBTITLE || id == ID_THEME_LABEL {
+                th.muted
+            } else {
+                th.text
+            };
+            SetTextColor(hdc, color);
+            ui_brush_bg() as LRESULT
         }
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
     }
@@ -1995,6 +2789,17 @@ fn main() {
         let class_name = wide("WingetPickerWnd");
         let class_ptr = class_name.as_ptr();
 
+        // 读取便携配置（主题/语言/静默），并注册自绘按钮窗口类
+        let cfg = config::Config::load();
+        theme::set_active_index(cfg.theme.resolve_index(theme::system_uses_dark()));
+        register_control_classes(instance);
+
+        // 图标资源（build.rs 编译 assets/app.rc；没有资源时回退系统默认图标）
+        let mut app_icon = LoadIconW(instance, 1usize as LPCWSTR);
+        if app_icon.is_null() {
+            app_icon = LoadIconW(std::ptr::null_mut(), 32512usize as LPCWSTR);
+        }
+
         let wc = WNDCLASSEXW {
             cb_size: std::mem::size_of::<WNDCLASSEXW>() as UINT,
             style: 0,
@@ -2002,12 +2807,12 @@ fn main() {
             cb_cls_extra: 0,
             cb_wnd_extra: 0,
             h_instance: instance,
-            h_icon: LoadIconW(std::ptr::null_mut(), 32512usize as LPCWSTR),
+            h_icon: app_icon,
             h_cursor: LoadCursorW(std::ptr::null_mut(), 32512usize as LPCWSTR),
-            hbr_background: (COLOR_BTNFACE + 1) as usize as HBRUSH,
+            hbr_background: std::ptr::null_mut(),
             lpsz_menu_name: std::ptr::null(),
             lpsz_class_name: class_ptr,
-            h_icon_sm: LoadIconW(std::ptr::null_mut(), 32512usize as LPCWSTR),
+            h_icon_sm: app_icon,
         };
         if RegisterClassExW(&wc) == 0 {
             return;
@@ -2051,7 +2856,7 @@ fn main() {
             return;
         }
 
-        let app = App::new(hwnd);
+        let app = App::new(hwnd, cfg);
         APP.with(|cell| {
             *cell.borrow_mut() = Some(app);
         });

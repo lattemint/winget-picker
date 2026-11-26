@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="300" height="300" viewBox="0 0 300 300">
+  <title>wingetpicker.svg</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path d="M100 50 L200 50 C227.614 50 250 72.386 250 100 L250 200 C250 227.614 227.614 250 200 250 L100 250 C72.386 250 50 227.614 50 200 L50 100 C50 72.386 72.386 50 100 50 Z" fill="#ffffff" stroke="#000000" stroke-width="10" stroke-miterlimit="10"/>
+    <polyline points="81.587,93.431 138.155,150 81.587,206.569" fill="#ffffff" stroke="#008ac2" stroke-width="5" stroke-miterlimit="10"/>
+    <polyline points="119.067,206.569 176.31,206.569 199.067,206.569" fill="#ffffff" stroke="#008ac2" stroke-width="5" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 150 125.094)" x="0" y="0" xml:space="preserve" font-family="&apos;OCR A Extended&apos;, monospace" font-size="18" fill="#006097" stroke="#0071bc" stroke-width="0.5" stroke-miterlimit="10"><tspan x="0" y="0">WINGET-</tspan><tspan x="0" y="21.6">PICKER</tspan></text>
+  </g>
+</svg>
