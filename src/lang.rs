@@ -43,6 +43,13 @@ pub struct Strings {
     pub winget_failed: &'static str,
     pub exit_code: &'static str,
     pub window_create_failed: &'static str,
+    pub about: &'static str,
+    pub about_desc: &'static str,
+    pub about_tech: &'static str,
+    pub about_link_label: &'static str,
+    pub about_data: &'static str,
+    pub about_license: &'static str,
+    pub about_close: &'static str,
 }
 
 pub const ZH: Strings = Strings {
@@ -83,6 +90,13 @@ pub const ZH: Strings = Strings {
     winget_failed: "winget 失败（{code}）",
     exit_code: "退出码 {code}",
     window_create_failed: "创建窗口失败。",
+    about: "关于",
+    about_desc: "升级你勾选的软件——避免 winget upgrade --all 动到不想升级的程序。",
+    about_tech: "Rust + 原生 Win32",
+    about_link_label: "GitHub 项目主页与问题反馈：",
+    about_data: "数据来源：本机 winget。程序不联网、不收集任何数据。",
+    about_license: "开源协议：MIT License © 2026 LatteMint",
+    about_close: "关闭",
 };
 
 pub const EN: Strings = Strings {
@@ -123,6 +137,13 @@ pub const EN: Strings = Strings {
     winget_failed: "winget failed ({code})",
     exit_code: "exit code {code}",
     window_create_failed: "Failed to create the window.",
+    about: "About",
+    about_desc: "Upgrade only the packages you select — so `winget upgrade --all` never touches apps you want to keep.",
+    about_tech: "Rust + raw Win32",
+    about_link_label: "Project & issues: ",
+    about_data: "Data comes from your local winget. The app has no network access and collects no data.",
+    about_license: "License: MIT © 2026 LatteMint",
+    about_close: "Close",
 };
 
 impl Strings {

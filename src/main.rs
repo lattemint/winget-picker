@@ -75,6 +75,14 @@ struct RECT {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+struct SIZE {
+    cx: i32,
+    cy: i32,
+}
+zero_default!(SIZE);
+
+#[repr(C)]
+#[derive(Clone, Copy)]
 struct MSG {
     hwnd: HWND,
     message: UINT,
@@ -392,6 +400,22 @@ const ID_THEME_LABEL: i32 = 1012;
 const ID_THEME_BASE: i32 = 1020; // 1020..=1024：5 个主题按钮
 const ID_LANG_LABEL: i32 = 1013;
 const ID_LANG_BASE: i32 = 1030; // 1030..=1032：跟随系统 / 中文 / English
+const ID_ABOUT: i32 = 1014;
+const ID_ABOUT_CLOSE: i32 = 1040;
+
+/// 关于窗里的项目地址
+const REPO_URL: &str = "https://github.com/lattemint/winget-picker/";
+
+// 关于窗
+const WM_SETCURSOR: UINT = 0x0020;
+const WM_NCDESTROY: UINT = 0x0082;
+const WS_POPUP: DWORD = 0x8000_0000;
+const GWLP_USERDATA: i32 = -21;
+const DT_WORDBREAK: UINT = 0x0010;
+const DT_LEFT: UINT = 0x0000;
+const IMAGE_ICON: UINT = 1;
+const DI_NORMAL: UINT = 0x0003;
+const IDC_HAND: LPCWSTR = 32649usize as LPCWSTR;
 
 // 自绘控件相关
 const WM_PAINT: UINT = 0x000F;
@@ -498,6 +522,32 @@ unsafe extern "system" {
     fn DrawFocusRect(hdc: HDC, rect: *const RECT) -> BOOL;
     fn TrackMouseEvent(event: *mut TRACKMOUSEEVENT) -> BOOL;
     fn GetDlgCtrlID(hwnd: HWND) -> i32;
+    fn GetWindowRect(hwnd: HWND, rect: *mut RECT) -> BOOL;
+    fn IsWindow(hwnd: HWND) -> BOOL;
+    fn SetForegroundWindow(hwnd: HWND) -> BOOL;
+    fn SetCursor(cursor: HCURSOR) -> HCURSOR;
+    fn GetCursorPos(point: *mut POINT) -> BOOL;
+    fn ScreenToClient(hwnd: HWND, point: *mut POINT) -> BOOL;
+    fn LoadImageW(
+        instance: HINSTANCE,
+        name: LPCWSTR,
+        kind: UINT,
+        cx: i32,
+        cy: i32,
+        flags: UINT,
+    ) -> *mut c_void;
+    fn DrawIconEx(
+        hdc: HDC,
+        x: i32,
+        y: i32,
+        icon: HICON,
+        cx: i32,
+        cy: i32,
+        istep: UINT,
+        brush: HBRUSH,
+        flags: UINT,
+    ) -> BOOL;
+    fn DestroyIcon(icon: HICON) -> BOOL;
 }
 
 #[link(name = "gdi32")]
@@ -520,6 +570,24 @@ unsafe extern "system" {
         section: *mut c_void,
         offset: DWORD,
     ) -> HBITMAP;
+    fn GetTextExtentPoint32W(
+        dc: HDC,
+        text: *const u16,
+        len: i32,
+        size: *mut SIZE,
+    ) -> BOOL;
+}
+
+#[link(name = "shell32")]
+unsafe extern "system" {
+    fn ShellExecuteW(
+        hwnd: HWND,
+        operation: LPCWSTR,
+        file: LPCWSTR,
+        parameters: LPCWSTR,
+        directory: LPCWSTR,
+        show_cmd: i32,
+    ) -> HINSTANCE;
 }
 
 #[link(name = "kernel32")]
@@ -942,6 +1010,342 @@ unsafe fn set_button_selected(hwnd: HWND, on: bool) {
     InvalidateRect(hwnd, std::ptr::null(), 1);
 }
 
+// ---------------------------------------------------------------- 关于窗
+
+struct AboutState {
+    font: HFONT,
+    title_font: HFONT,
+    dpi: i32,
+    icon: HICON,
+    close: HWND,
+    link_rect: RECT,
+}
+
+unsafe fn about_paint(hwnd: HWND) {
+    let state_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut AboutState;
+    if state_ptr.is_null() {
+        return;
+    }
+    let state = &mut *state_ptr;
+    let th = *theme::active();
+    let t = lang::t();
+    let s = |v: i32| -> i32 { (v as i64 * state.dpi as i64 / 96) as i32 };
+
+    let mut ps: PAINTSTRUCT = std::mem::zeroed();
+    let hdc = BeginPaint(hwnd, &mut ps);
+    let mut rc: RECT = std::mem::zeroed();
+    GetClientRect(hwnd, &mut rc);
+    let bg = CreateSolidBrush(th.bg);
+    FillRect(hdc, &rc, bg);
+    DeleteObject(bg as HGDIOBJ);
+    SetBkMode(hdc, TRANSPARENT);
+
+    // logo
+    if !state.icon.is_null() {
+        DrawIconEx(hdc, s(24), s(24), state.icon, s(96), s(96), 0, std::ptr::null_mut(), DI_NORMAL);
+    }
+
+    // 名称
+    SelectObject(hdc, state.title_font as HGDIOBJ);
+    SetTextColor(hdc, th.text);
+    let name_text = wide(t.app_name);
+    let mut name_rect = RECT {
+        left: s(136),
+        top: s(24),
+        right: rc.right - s(24),
+        bottom: s(58),
+    };
+    DrawTextW(hdc, name_text.as_ptr(), -1, &mut name_rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+    // 版本
+    SelectObject(hdc, state.font as HGDIOBJ);
+    SetTextColor(hdc, th.muted);
+    let version = wide(&format!("v{}", env!("CARGO_PKG_VERSION")));
+    let mut ver_rect = RECT {
+        left: s(140),
+        top: s(60),
+        right: rc.right - s(24),
+        bottom: s(82),
+    };
+    DrawTextW(hdc, version.as_ptr(), -1, &mut ver_rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+    // 简介（整行宽度）
+    SetTextColor(hdc, th.text);
+    let desc = wide(t.about_desc);
+    let mut desc_rect = RECT {
+        left: s(24),
+        top: s(124),
+        right: rc.right - s(24),
+        bottom: s(166),
+    };
+    DrawTextW(hdc, desc.as_ptr(), -1, &mut desc_rect, DT_LEFT | DT_WORDBREAK);
+
+    // 技术副标
+    SetTextColor(hdc, th.muted);
+    let tech = wide(t.about_tech);
+    let mut tech_rect = RECT {
+        left: s(24),
+        top: s(170),
+        right: rc.right - s(24),
+        bottom: s(194),
+    };
+    DrawTextW(hdc, tech.as_ptr(), -1, &mut tech_rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+    // 项目链接
+    let label = wide(t.about_link_label);
+    let mut label_rect = RECT {
+        left: s(24),
+        top: s(196),
+        right: rc.right - s(24),
+        bottom: s(222),
+    };
+    DrawTextW(hdc, label.as_ptr(), -1, &mut label_rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    let mut label_size: SIZE = std::mem::zeroed();
+    GetTextExtentPoint32W(hdc, label.as_ptr(), label.len() as i32 - 1, &mut label_size);
+    let link_x = s(24) + label_size.cx + s(2);
+    let url = wide(REPO_URL);
+    SetTextColor(hdc, th.accent);
+    let mut url_rect = RECT {
+        left: link_x,
+        top: s(196),
+        right: rc.right - s(24),
+        bottom: s(222),
+    };
+    DrawTextW(hdc, url.as_ptr(), -1, &mut url_rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    let mut url_size: SIZE = std::mem::zeroed();
+    GetTextExtentPoint32W(hdc, url.as_ptr(), url.len() as i32 - 1, &mut url_size);
+    let underline = RECT {
+        left: link_x,
+        top: s(220),
+        right: link_x + url_size.cx,
+        bottom: s(221),
+    };
+    let underline_brush = CreateSolidBrush(th.accent);
+    FillRect(hdc, &underline, underline_brush);
+    DeleteObject(underline_brush as HGDIOBJ);
+    state.link_rect = RECT {
+        left: link_x,
+        top: s(196),
+        right: link_x + url_size.cx,
+        bottom: s(226),
+    };
+
+    // 数据说明 / 许可
+    SetTextColor(hdc, th.muted);
+    let data = wide(t.about_data);
+    let mut data_rect = RECT {
+        left: s(24),
+        top: s(230),
+        right: rc.right - s(24),
+        bottom: s(284),
+    };
+    DrawTextW(hdc, data.as_ptr(), -1, &mut data_rect, DT_LEFT | DT_WORDBREAK);
+    let license = wide(t.about_license);
+    let mut license_rect = RECT {
+        left: s(24),
+        top: s(286),
+        right: rc.right - s(24),
+        bottom: s(310),
+    };
+    DrawTextW(hdc, license.as_ptr(), -1, &mut license_rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+    EndPaint(hwnd, &ps);
+}
+
+unsafe extern "system" fn about_proc(
+    hwnd: HWND,
+    msg: UINT,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    match msg {
+        WM_ERASEBKGND => {
+            let hdc = wparam as HDC;
+            let mut rc: RECT = std::mem::zeroed();
+            GetClientRect(hwnd, &mut rc);
+            let th = *theme::active();
+            let brush = CreateSolidBrush(th.bg);
+            FillRect(hdc, &rc, brush);
+            DeleteObject(brush as HGDIOBJ);
+            1
+        }
+        WM_PAINT => {
+            about_paint(hwnd);
+            0
+        }
+        WM_SETCURSOR => {
+            let state_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut AboutState;
+            if !state_ptr.is_null() {
+                let mut point = POINT { x: 0, y: 0 };
+                if GetCursorPos(&mut point) != 0 {
+                    ScreenToClient(hwnd, &mut point);
+                    let r = (*state_ptr).link_rect;
+                    if point.x >= r.left
+                        && point.x < r.right
+                        && point.y >= r.top
+                        && point.y < r.bottom
+                    {
+                        SetCursor(LoadCursorW(std::ptr::null_mut(), IDC_HAND));
+                        return 1;
+                    }
+                }
+            }
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
+        WM_LBUTTONUP => {
+            let state_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut AboutState;
+            if !state_ptr.is_null() {
+                let x = (lparam & 0xFFFF) as i16 as i32;
+                let y = ((lparam >> 16) & 0xFFFF) as i16 as i32;
+                let r = (*state_ptr).link_rect;
+                if x >= r.left && x < r.right && y >= r.top && y < r.bottom {
+                    let op = wide("open");
+                    let url = wide(REPO_URL);
+                    ShellExecuteW(
+                        hwnd,
+                        op.as_ptr(),
+                        url.as_ptr(),
+                        std::ptr::null(),
+                        std::ptr::null(),
+                        1,
+                    );
+                }
+            }
+            0
+        }
+        WM_COMMAND => {
+            let id = (wparam & 0xFFFF) as i32;
+            if id == ID_ABOUT_CLOSE {
+                DestroyWindow(hwnd);
+            }
+            0
+        }
+        WM_CLOSE => {
+            DestroyWindow(hwnd);
+            0
+        }
+        WM_NCDESTROY => {
+            let state_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut AboutState;
+            if !state_ptr.is_null() {
+                SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+                let state = Box::from_raw(state_ptr);
+                if !state.icon.is_null() {
+                    DestroyIcon(state.icon);
+                }
+            }
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
+        _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+    }
+}
+
+unsafe fn show_about(owner: HWND, font: HFONT, title_font: HFONT, dpi: i32) {
+    let instance = GetModuleHandleW(std::ptr::null());
+    let class = wide("WPAbout");
+    let s = |v: i32| -> i32 { (v as i64 * dpi as i64 / 96) as i32 };
+    let style = WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN;
+    let mut frame = RECT {
+        left: 0,
+        top: 0,
+        right: s(540),
+        bottom: s(360),
+    };
+    AdjustWindowRectEx(&mut frame, style, 0, 0);
+    let win_w = frame.right - frame.left;
+    let win_h = frame.bottom - frame.top;
+    let mut owner_rect: RECT = std::mem::zeroed();
+    GetWindowRect(owner, &mut owner_rect);
+    let x = owner_rect.left + ((owner_rect.right - owner_rect.left) - win_w) / 2;
+    let y = owner_rect.top + ((owner_rect.bottom - owner_rect.top) - win_h) / 2;
+
+    let state = Box::into_raw(Box::new(AboutState {
+        font,
+        title_font,
+        dpi,
+        icon: LoadImageW(instance, 1usize as LPCWSTR, IMAGE_ICON, s(96), s(96), 0) as HICON,
+        close: std::ptr::null_mut(),
+        link_rect: RECT {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        },
+    }));
+    let title = wide(lang::t().app_name);
+    let hwnd = CreateWindowExW(
+        0,
+        class.as_ptr(),
+        title.as_ptr(),
+        style,
+        x,
+        y,
+        win_w,
+        win_h,
+        owner,
+        std::ptr::null_mut(),
+        instance,
+        std::ptr::null_mut(),
+    );
+    if hwnd.is_null() {
+        let state = Box::from_raw(state);
+        if !state.icon.is_null() {
+            DestroyIcon(state.icon);
+        }
+        return;
+    }
+    SetWindowLongPtrW(hwnd, GWLP_USERDATA, state as isize);
+    set_dark_titlebar(hwnd, theme::active().dark);
+
+    let close_class = wide("WPButton");
+    let close_text = wide(lang::t().about_close);
+    let close = CreateWindowExW(
+        0,
+        close_class.as_ptr(),
+        close_text.as_ptr(),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        s(540) - s(24) - s(100),
+        s(360) - s(24) - s(30),
+        s(100),
+        s(30),
+        hwnd,
+        ID_ABOUT_CLOSE as usize as HMENU,
+        instance,
+        std::ptr::null_mut(),
+    );
+    if !close.is_null() {
+        SendMessageW(close, WM_SETFONT, font as WPARAM, 1);
+        (*state).close = close;
+    }
+
+    EnableWindow(owner, 0);
+    ShowWindow(hwnd, SW_SHOW);
+    UpdateWindow(hwnd);
+    if !close.is_null() {
+        SetFocus(close);
+    }
+
+    let mut msg: MSG = std::mem::zeroed();
+    loop {
+        let ret = GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0);
+        if ret <= 0 {
+            break;
+        }
+        if msg.hwnd == hwnd && msg.message == WM_KEYDOWN && msg.w_param as u16 == VK_ESCAPE {
+            DestroyWindow(hwnd);
+            break;
+        }
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+        if IsWindow(hwnd) == 0 {
+            break;
+        }
+    }
+    if IsWindow(owner) != 0 {
+        EnableWindow(owner, 1);
+        SetForegroundWindow(owner);
+    }
+}
+
 unsafe fn register_control_classes(instance: HINSTANCE) {
     let class = wide("WPButton");
     let wc = WNDCLASSEXW {
@@ -959,6 +1363,24 @@ unsafe fn register_control_classes(instance: HINSTANCE) {
         h_icon_sm: std::ptr::null_mut(),
     };
     RegisterClassExW(&wc);
+
+    let about_class = wide("WPAbout");
+    let about_icon = LoadIconW(instance, 1usize as LPCWSTR);
+    let wc_about = WNDCLASSEXW {
+        cb_size: std::mem::size_of::<WNDCLASSEXW>() as UINT,
+        style: 0,
+        lpfn_wnd_proc: Some(about_proc),
+        cb_cls_extra: 0,
+        cb_wnd_extra: 0,
+        h_instance: instance,
+        h_icon: about_icon,
+        h_cursor: LoadCursorW(std::ptr::null_mut(), 32512usize as LPCWSTR),
+        hbr_background: std::ptr::null_mut(),
+        lpsz_menu_name: std::ptr::null(),
+        lpsz_class_name: about_class.as_ptr(),
+        h_icon_sm: about_icon,
+    };
+    RegisterClassExW(&wc_about);
 }
 
 // ---------------------------------------------------------------- 数据模型
@@ -1553,6 +1975,7 @@ struct App {
     btn_none: HWND,
     btn_upgrade: HWND,
     btn_back: HWND,
+    btn_about: HWND,
     theme_label: HWND,
     theme_btns: [HWND; 5],
     lang_label: HWND,
@@ -1577,6 +2000,8 @@ struct App {
     current_start: Option<std::time::Instant>,
     last_status_tick: Option<std::time::Instant>,
     font: HFONT,
+    title_font: HFONT,
+    dpi: i32,
     theme_choice: theme::Choice,
     lang_choice: config::Lang,
     config: config::Config,
@@ -1756,6 +2181,10 @@ impl App {
             hwnd, instance, &class_button, lang::t().back,
             BS_PUSHBUTTON | WS_TABSTOP, 0, s(704), s(472), s(100), s(32), ID_BACK, font,
         );
+        let btn_about = make_child(
+            hwnd, instance, &class_button, lang::t().about,
+            BS_PUSHBUTTON | WS_TABSTOP, 0, s(704), s(436), s(100), s(26), ID_ABOUT, font,
+        );
 
         // 设置区：主题分段按钮（只在初始界面显示）
         let theme_widths = [s(84), s(60), s(60), s(86), s(86)];
@@ -1856,6 +2285,7 @@ impl App {
             btn_none,
             btn_upgrade,
             btn_back,
+            btn_about,
             theme_label,
             theme_btns,
             lang_label,
@@ -1877,6 +2307,8 @@ impl App {
             current_start: None,
             last_status_tick: None,
             font,
+            title_font,
+            dpi,
             theme_choice: initial_choice,
             lang_choice: initial_lang,
             config: cfg,
@@ -1991,6 +2423,7 @@ impl App {
         set_text(self.btn_back, t.back);
         set_text(self.theme_label, t.theme_label);
         set_text(self.lang_label, t.lang_label);
+        set_text(self.btn_about, t.about);
         for (i, btn) in self.theme_btns.iter().enumerate() {
             set_text(*btn, t.theme_labels[i]);
         }
@@ -2011,6 +2444,7 @@ impl App {
             self.btn_none,
             self.btn_upgrade,
             self.btn_back,
+            self.btn_about,
         ];
         for h in repaint {
             if !h.is_null() {
@@ -2114,6 +2548,8 @@ impl App {
             show(*btn, init);
             enable(*btn, init);
         }
+        show(self.btn_about, init);
+        enable(self.btn_about, init);
         // 升级期间列表保持可用：可以滚动/查看进度，只是勾选会被锁定
         enable(self.list, list_mode || upgrading);
         enable(self.btn_all, list_mode);
@@ -2598,6 +3034,15 @@ impl App {
                 self.begin_upgrade(indices);
                 None
             }
+            ID_ABOUT => {
+                unsafe {
+                    show_about(self.hwnd, self.font, self.title_font, self.dpi);
+                    if !self.btn_about.is_null() {
+                        SetFocus(self.btn_about);
+                    }
+                }
+                None
+            }
             id if (ID_THEME_BASE..=ID_THEME_BASE + 4).contains(&id) => {
                 let index = (id - ID_THEME_BASE) as usize;
                 if let Some(choice) = theme::Choice::from_index(index) {
@@ -2773,7 +3218,13 @@ impl App {
     fn focus_next(prev: bool) {
         with_app(|app| {
             let candidates: Vec<HWND> = match app.phase {
-                Phase::Init => vec![app.btn_view, app.btn_exit],
+                Phase::Init => {
+                    let mut v = vec![app.btn_view, app.btn_exit];
+                    v.extend(app.theme_btns.iter().copied());
+                    v.extend(app.lang_btns.iter().copied());
+                    v.push(app.btn_about);
+                    v
+                }
                 Phase::List => vec![
                     app.list,
                     app.btn_all,
