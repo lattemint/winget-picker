@@ -309,6 +309,7 @@ const WS_EX_CLIENTEDGE: DWORD = 0x0000_0200;
 const BS_PUSHBUTTON: DWORD = 0x0000_0000;
 const SS_LEFT: DWORD = 0x0000_0000;
 const SS_CENTER: DWORD = 0x0000_0001;
+const SS_RIGHT: DWORD = 0x0000_0002;
 const SS_NOPREFIX: DWORD = 0x0000_0080;
 
 const LVS_REPORT: DWORD = 0x0001;
@@ -2248,31 +2249,32 @@ impl App {
             BS_PUSHBUTTON | WS_TABSTOP, 0, s(704), s(472), s(100), s(32), ID_BACK, font,
         );
 
-        // 设置区：2×2 表格。第一列靠左，第二列在右半区内居中。
+        // 设置区：2×2 表格。设置按钮统一 80×26，标签右对齐并与按钮保持 8px 间距。
         let row1_y = s(400);
         let row2_y = s(436);
         let ctl_h = s(26);
-        let left_x = s(40);
+        let left_x = s(36);
+        let label_w = s(64);
+        let label_gap = s(8);
+        let btn_w = s(80);
+        let btn_gap = s(6);
 
         // 第一列第一行：主题
-        let theme_widths = [s(84), s(60), s(60), s(86), s(86)];
-        let theme_gap = s(6);
-        let theme_label_w = s(72);
         let theme_label = make_child(
             hwnd,
             instance,
             &class_static,
             lang::t().theme_label,
-            SS_LEFT | SS_NOPREFIX,
+            SS_RIGHT | SS_NOPREFIX,
             0,
             left_x,
             row1_y,
-            theme_label_w,
+            label_w,
             ctl_h,
             ID_THEME_LABEL,
             font,
         );
-        let mut theme_x = left_x + theme_label_w + s(8);
+        let mut theme_x = left_x + label_w + label_gap;
         let mut theme_btns: [HWND; 5] = [std::ptr::null_mut(); 5];
         for (i, _choice) in theme::CHOICES.iter().enumerate() {
             theme_btns[i] = make_child(
@@ -2284,33 +2286,30 @@ impl App {
                 0,
                 theme_x,
                 row1_y,
-                theme_widths[i],
+                btn_w,
                 ctl_h,
                 ID_THEME_BASE + i as i32,
                 font,
             );
-            theme_x += theme_widths[i] + theme_gap;
+            theme_x += btn_w + btn_gap;
         }
 
         // 第一列第二行：语言
-        let lang_widths = [s(90), s(64), s(80)];
-        let lang_gap = s(6);
-        let lang_label_w = s(72);
         let lang_label = make_child(
             hwnd,
             instance,
             &class_static,
             lang::t().lang_label,
-            SS_LEFT | SS_NOPREFIX,
+            SS_RIGHT | SS_NOPREFIX,
             0,
             left_x,
             row2_y,
-            lang_label_w,
+            label_w,
             ctl_h,
             ID_LANG_LABEL,
             font,
         );
-        let mut lang_x = left_x + lang_label_w + s(8);
+        let mut lang_x = left_x + label_w + label_gap;
         let mut lang_btns: [HWND; 3] = [std::ptr::null_mut(); 3];
         for (i, text) in lang::t().lang_labels.iter().enumerate() {
             lang_btns[i] = make_child(
@@ -2322,42 +2321,40 @@ impl App {
                 0,
                 lang_x,
                 row2_y,
-                lang_widths[i],
+                btn_w,
                 ctl_h,
                 ID_LANG_BASE + i as i32,
                 font,
             );
-            lang_x += lang_widths[i];
-            if i + 1 < lang_widths.len() {
-                lang_x += lang_gap;
+            lang_x += btn_w;
+            if i + 1 < lang_btns.len() {
+                lang_x += btn_gap;
             }
         }
 
-        // 第二列所在区域：右半区
-        let col2_left = s(552);
+        // 第二列所在区域：右半区，内容居中
+        let col2_left = s(544);
         let col2_right = s(804);
         let col2_w = col2_right - col2_left;
 
         // 第二列第一行：静默升级
-        let silent_btn_w = s(48);
-        let silent_label_w = s(56);
-        let silent_group_w = silent_label_w + s(8) + silent_btn_w * 2 + lang_gap;
+        let silent_group_w = label_w + label_gap + btn_w * 2 + btn_gap;
         let silent_x = col2_left + (col2_w - silent_group_w) / 2;
         let silent_label = make_child(
             hwnd,
             instance,
             &class_static,
             lang::t().silent_label,
-            SS_LEFT | SS_NOPREFIX,
+            SS_RIGHT | SS_NOPREFIX,
             0,
             silent_x,
             row1_y,
-            silent_label_w,
+            label_w,
             ctl_h,
             ID_SILENT_LABEL,
             font,
         );
-        let silent_buttons_x = silent_x + silent_label_w + s(8);
+        let silent_buttons_x = silent_x + label_w + label_gap;
         let silent_btns: [HWND; 2] = [
             make_child(
                 hwnd,
@@ -2368,7 +2365,7 @@ impl App {
                 0,
                 silent_buttons_x,
                 row1_y,
-                silent_btn_w,
+                btn_w,
                 ctl_h,
                 ID_SILENT_OFF,
                 font,
@@ -2380,9 +2377,9 @@ impl App {
                 lang::t().silent_on,
                 WS_TABSTOP,
                 0,
-                silent_buttons_x + silent_btn_w + lang_gap,
+                silent_buttons_x + btn_w + btn_gap,
                 row1_y,
-                silent_btn_w,
+                btn_w,
                 ctl_h,
                 ID_SILENT_ON,
                 font,
@@ -2390,8 +2387,7 @@ impl App {
         ];
 
         // 第二列第二行：关于
-        let about_w = s(100);
-        let about_x = col2_left + (col2_w - about_w) / 2;
+        let about_x = col2_left + (col2_w - btn_w) / 2;
         let btn_about = make_child(
             hwnd,
             instance,
@@ -2401,7 +2397,7 @@ impl App {
             0,
             about_x,
             row2_y,
-            about_w,
+            btn_w,
             ctl_h,
             ID_ABOUT,
             font,

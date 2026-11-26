@@ -150,7 +150,7 @@ $ox = $pt.X - $wr.Left
 $oy = $pt.Y - $wr.Top
 # (x,y) 取各控件内部空白处：主题标签 / 语言标签 / 静默标签 / 主题按钮 / 语言按钮 / 静默按钮 / 关于按钮
 $samples = @(
-    @(66, 412), @(66, 448), @(633, 412),
+    @(66, 412), @(66, 448), @(557, 412),
     @(158, 422), @(180, 458), @(688, 422), @(690, 458)
 )
 $img = New-Object System.Drawing.Bitmap (Join-Path $OutDir "theme-dark-to-light.png")
@@ -169,7 +169,7 @@ Start-Sleep -Milliseconds 800
 Snap $hwnd "theme-light-to-dark.png"
 $img = New-Object System.Drawing.Bitmap (Join-Path $OutDir "theme-light-to-dark.png")
 $bright = @()
-foreach ($s in @(@(66, 412), @(66, 448), @(633, 412))) {
+foreach ($s in @(@(66, 412), @(66, 448), @(557, 412))) {
     $c = $img.GetPixel($ox + $s[0], $oy + $s[1])
     if ($c.R -gt 150) { $bright += "($($s[0]),$($s[1]))=$($c.R),$($c.G),$($c.B)" }
 }
