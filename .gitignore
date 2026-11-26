@@ -32,3 +32,6 @@ desktop.ini
 
 # 设计源文件（不算构建产物，但也不进仓库）
 *.vectorcraft
+
+# README 旧版备份（本地保留，不进仓库）
+/README.v0.1-backup.md
