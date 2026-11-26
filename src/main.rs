@@ -382,6 +382,7 @@ const MB_ICONINFORMATION: UINT = 0x0000_0040;
 const MB_ICONWARNING: UINT = 0x0000_0030;
 const MB_YESNO: UINT = 0x0000_0004;
 const MB_ICONQUESTION: UINT = 0x0000_0020;
+const MB_DEFBUTTON2: UINT = 0x0000_0100;
 const IDYES: i32 = 6;
 
 // 控件 ID
@@ -402,6 +403,9 @@ const ID_LANG_LABEL: i32 = 1013;
 const ID_LANG_BASE: i32 = 1030; // 1030..=1032：跟随系统 / 中文 / English
 const ID_ABOUT: i32 = 1014;
 const ID_ABOUT_CLOSE: i32 = 1040;
+const ID_SILENT_LABEL: i32 = 1015;
+const ID_SILENT_OFF: i32 = 1016;
+const ID_SILENT_ON: i32 = 1017;
 
 /// 关于窗里的项目地址
 const REPO_URL: &str = "https://github.com/lattemint/winget-picker/";
@@ -1876,21 +1880,22 @@ fn fetch_upgrades() -> Result<Vec<Item>, String> {
     ))
 }
 
-/// 升级单个软件包。
-fn upgrade_package(id: &str) -> Result<(), String> {
-    let out = winget_run(
-        &[
-            "upgrade",
-            "--id",
-            id,
-            "--exact",
-            "--include-unknown",
-            "--accept-source-agreements",
-            "--accept-package-agreements",
-            "--disable-interactivity",
-        ],
-        None,
-    )?;
+/// 升级单个软件包。`silent` 为 true 时追加 `--silent`。
+fn upgrade_package(id: &str, silent: bool) -> Result<(), String> {
+    let mut args: Vec<&str> = vec![
+        "upgrade",
+        "--id",
+        id,
+        "--exact",
+        "--include-unknown",
+        "--accept-source-agreements",
+        "--accept-package-agreements",
+        "--disable-interactivity",
+    ];
+    if silent {
+        args.push("--silent");
+    }
+    let out = winget_run(&args, None)?;
     if out.success {
         return Ok(());
     }
@@ -1923,10 +1928,15 @@ enum TaskMsg {
     ProgressResult {
         index: usize,
         ok: bool,
+        fallback: bool,
+    },
+    SilentFallback {
+        index: usize,
     },
     UpgradeDone {
         ok: usize,
         fail: usize,
+        fallbacks: usize,
         failures: Vec<(String, String)>,
     },
 }
@@ -1980,6 +1990,8 @@ struct App {
     theme_btns: [HWND; 5],
     lang_label: HWND,
     lang_btns: [HWND; 3],
+    silent_label: HWND,
+    silent_btns: [HWND; 2],
     phase: Phase,
     items: Vec<Item>,
     tx: Sender<TaskMsg>,
@@ -2181,10 +2193,6 @@ impl App {
             hwnd, instance, &class_button, lang::t().back,
             BS_PUSHBUTTON | WS_TABSTOP, 0, s(704), s(472), s(100), s(32), ID_BACK, font,
         );
-        let btn_about = make_child(
-            hwnd, instance, &class_button, lang::t().about,
-            BS_PUSHBUTTON | WS_TABSTOP, 0, s(704), s(436), s(100), s(26), ID_ABOUT, font,
-        );
 
         // 设置区：主题分段按钮（只在初始界面显示）
         let theme_widths = [s(84), s(60), s(60), s(86), s(86)];
@@ -2227,13 +2235,19 @@ impl App {
             theme_x += theme_widths[i] + theme_gap;
         }
 
-        // 设置区第二行：语言
+        // 设置区第二行：语言 + 静默升级 + 关于（整行居中）
         let lang_widths = [s(90), s(64), s(80)];
         let lang_gap = s(6);
         let lang_label_w = s(72);
-        let lang_total: i32 =
-            lang_widths.iter().sum::<i32>() + lang_gap * 2 + lang_label_w + s(8);
-        let mut lang_x = (s(820) - lang_total) / 2;
+        let silent_btn_w = s(48);
+        let silent_label_w = s(84);
+        let about_w = s(100);
+        let row_gap = s(24);
+        let lang_group =
+            lang_label_w + s(8) + lang_widths.iter().sum::<i32>() + lang_gap * 2;
+        let silent_group = silent_label_w + s(8) + silent_btn_w * 2 + lang_gap;
+        let row_total = lang_group + row_gap + silent_group + s(16) + about_w;
+        let mut row_x = (s(820) - row_total) / 2;
         let lang_label = make_child(
             hwnd,
             instance,
@@ -2241,14 +2255,14 @@ impl App {
             lang::t().lang_label,
             SS_LEFT | SS_NOPREFIX,
             0,
-            lang_x,
+            row_x,
             s(436),
             lang_label_w,
             s(26),
             ID_LANG_LABEL,
             font,
         );
-        lang_x += lang_label_w + s(8);
+        row_x += lang_label_w + s(8);
         let mut lang_btns: [HWND; 3] = [std::ptr::null_mut(); 3];
         for (i, text) in lang::t().lang_labels.iter().enumerate() {
             lang_btns[i] = make_child(
@@ -2258,20 +2272,85 @@ impl App {
                 text,
                 WS_TABSTOP,
                 0,
-                lang_x,
+                row_x,
                 s(436),
                 lang_widths[i],
                 s(26),
                 ID_LANG_BASE + i as i32,
                 font,
             );
-            lang_x += lang_widths[i] + lang_gap;
+            row_x += lang_widths[i];
+            if i + 1 < lang_widths.len() {
+                row_x += lang_gap;
+            }
         }
+        row_x += row_gap;
+        let silent_label = make_child(
+            hwnd,
+            instance,
+            &class_static,
+            lang::t().silent_label,
+            SS_LEFT | SS_NOPREFIX,
+            0,
+            row_x,
+            s(436),
+            silent_label_w,
+            s(26),
+            ID_SILENT_LABEL,
+            font,
+        );
+        row_x += silent_label_w + s(8);
+        let silent_btns: [HWND; 2] = [
+            make_child(
+                hwnd,
+                instance,
+                &class_button,
+                lang::t().silent_off,
+                WS_TABSTOP,
+                0,
+                row_x,
+                s(436),
+                silent_btn_w,
+                s(26),
+                ID_SILENT_OFF,
+                font,
+            ),
+            make_child(
+                hwnd,
+                instance,
+                &class_button,
+                lang::t().silent_on,
+                WS_TABSTOP,
+                0,
+                row_x + silent_btn_w + lang_gap,
+                s(436),
+                silent_btn_w,
+                s(26),
+                ID_SILENT_ON,
+                font,
+            ),
+        ];
+        row_x += silent_btn_w * 2 + lang_gap + s(16);
+        let btn_about = make_child(
+            hwnd,
+            instance,
+            &class_button,
+            lang::t().about,
+            WS_TABSTOP,
+            0,
+            row_x,
+            s(436),
+            about_w,
+            s(26),
+            ID_ABOUT,
+            font,
+        );
 
         let (tx, rx) = channel();
 
         let initial_choice = cfg.theme;
         let initial_lang = cfg.lang;
+        let initial_silent = cfg.silent;
         let mut app = Box::new(App {
             hwnd,
             title,
@@ -2290,6 +2369,8 @@ impl App {
             theme_btns,
             lang_label,
             lang_btns,
+            silent_label,
+            silent_btns,
             phase: Phase::Init,
             items: Vec::new(),
             tx,
@@ -2324,6 +2405,9 @@ impl App {
         }
         for (i, btn) in app.lang_btns.iter().enumerate() {
             set_button_selected(*btn, initial_lang.index() == i);
+        }
+        for (i, btn) in app.silent_btns.iter().enumerate() {
+            set_button_selected(*btn, (i == 1) == initial_silent);
         }
         app.apply_theme_visual(initial_choice);
         app.apply_phase();
@@ -2405,6 +2489,16 @@ impl App {
         self.config.save();
     }
 
+    /// 用户切换静默升级：更新选中态 + 写配置。
+    fn set_silent(&mut self, on: bool) {
+        self.config.silent = on;
+        unsafe {
+            set_button_selected(self.silent_btns[0], !on);
+            set_button_selected(self.silent_btns[1], on);
+        }
+        self.config.save();
+    }
+
     /// 应用语言到所有界面文案（不写配置）。
     unsafe fn apply_language_visual(&mut self, choice: config::Lang) {
         self.lang_choice = choice;
@@ -2424,6 +2518,12 @@ impl App {
         set_text(self.theme_label, t.theme_label);
         set_text(self.lang_label, t.lang_label);
         set_text(self.btn_about, t.about);
+        set_text(self.silent_label, t.silent_label);
+        set_text(self.silent_btns[0], t.silent_off);
+        set_text(self.silent_btns[1], t.silent_on);
+        let silent = self.config.silent;
+        set_button_selected(self.silent_btns[0], !silent);
+        set_button_selected(self.silent_btns[1], silent);
         for (i, btn) in self.theme_btns.iter().enumerate() {
             set_text(*btn, t.theme_labels[i]);
         }
@@ -2445,6 +2545,9 @@ impl App {
             self.btn_upgrade,
             self.btn_back,
             self.btn_about,
+            self.silent_label,
+            self.silent_btns[0],
+            self.silent_btns[1],
         ];
         for h in repaint {
             if !h.is_null() {
@@ -2545,6 +2648,11 @@ impl App {
         }
         show(self.lang_label, init);
         for btn in self.lang_btns.iter() {
+            show(*btn, init);
+            enable(*btn, init);
+        }
+        show(self.silent_label, init);
+        for btn in self.silent_btns.iter() {
             show(*btn, init);
             enable(*btn, init);
         }
@@ -2815,10 +2923,12 @@ impl App {
             SendMessageW(self.progress, PBM_SETRANGE32, 0, total as LPARAM);
         }
         self.start_timer();
+        let silent = self.config.silent;
         let tx = self.tx.clone();
         thread::spawn(move || {
             let total = selected.len();
             let mut ok = 0usize;
+            let mut fallbacks = 0usize;
             let mut failures: Vec<(String, String)> = Vec::new();
             for (n, (index, item)) in selected.into_iter().enumerate() {
                 if tx
@@ -2832,20 +2942,60 @@ impl App {
                 {
                     return;
                 }
-                match upgrade_package(&item.id) {
+                let result = upgrade_package(&item.id, silent);
+                if silent {
+                    if let Err(first) = &result {
+                        let _ = tx.send(TaskMsg::SilentFallback { index });
+                        match upgrade_package(&item.id, false) {
+                            Ok(()) => {
+                                fallbacks += 1;
+                                ok += 1;
+                                let _ = tx.send(TaskMsg::ProgressResult {
+                                    index,
+                                    ok: true,
+                                    fallback: true,
+                                });
+                                continue;
+                            }
+                            Err(second) => {
+                                let detail = lang::tpl(
+                                    lang::t().silent_fallback_failed,
+                                    &[("first", first), ("second", &second)],
+                                );
+                                failures.push((item.name.clone(), detail));
+                                let _ = tx.send(TaskMsg::ProgressResult {
+                                    index,
+                                    ok: false,
+                                    fallback: true,
+                                });
+                                continue;
+                            }
+                        }
+                    }
+                }
+                match result {
                     Ok(()) => {
                         ok += 1;
-                        let _ = tx.send(TaskMsg::ProgressResult { index, ok: true });
+                        let _ = tx.send(TaskMsg::ProgressResult {
+                            index,
+                            ok: true,
+                            fallback: false,
+                        });
                     }
                     Err(e) => {
                         failures.push((item.name.clone(), e));
-                        let _ = tx.send(TaskMsg::ProgressResult { index, ok: false });
+                        let _ = tx.send(TaskMsg::ProgressResult {
+                            index,
+                            ok: false,
+                            fallback: false,
+                        });
                     }
                 }
             }
             let _ = tx.send(TaskMsg::UpgradeDone {
                 ok,
                 fail: failures.len(),
+                fallbacks,
                 failures,
             });
         });
@@ -2920,7 +3070,17 @@ impl App {
                 self.invalidate_list();
                 None
             }
-            TaskMsg::ProgressResult { index, ok } => {
+            TaskMsg::SilentFallback { index } => {
+                self.set_status(lang::t().silent_retrying);
+                self.set_result(index, lang::t().upgrading);
+                self.invalidate_list();
+                None
+            }
+            TaskMsg::ProgressResult {
+                index,
+                ok,
+                fallback: _,
+            } => {
                 let result_text = if ok {
                     lang::t().ok
                 } else {
@@ -2952,7 +3112,12 @@ impl App {
                 self.invalidate_list();
                 None
             }
-            TaskMsg::UpgradeDone { ok, fail, failures } => {
+            TaskMsg::UpgradeDone {
+                ok,
+                fail,
+                fallbacks,
+                failures,
+            } => {
                 self.stop_timer();
                 let mut text = if fail == 0 {
                     lang::t().summary_all_ok_text(ok)
@@ -2978,6 +3143,13 @@ impl App {
                             &[("n", &(failures.len() - 5).to_string())],
                         ));
                     }
+                }
+                if fallbacks > 0 {
+                    text.push_str("\n\n");
+                    text.push_str(&lang::tpl(
+                        lang::t().silent_fallback_note,
+                        &[("n", &fallbacks.to_string())],
+                    ));
                 }
                 self.reset_to_init();
                 Some(text)
@@ -3031,7 +3203,29 @@ impl App {
                 if indices.is_empty() {
                     return Some(lang::t().select_hint.to_string());
                 }
+                if self.config.silent {
+                    let warn = lang::tpl(
+                        lang::t().silent_warning,
+                        &[("n", &indices.len().to_string())],
+                    );
+                    if message_box_ex(
+                        self.hwnd,
+                        &warn,
+                        MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2,
+                    ) != IDYES
+                    {
+                        return None;
+                    }
+                }
                 self.begin_upgrade(indices);
+                None
+            }
+            ID_SILENT_OFF => {
+                self.set_silent(false);
+                None
+            }
+            ID_SILENT_ON => {
+                self.set_silent(true);
                 None
             }
             ID_ABOUT => {

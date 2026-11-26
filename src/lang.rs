@@ -50,6 +50,13 @@ pub struct Strings {
     pub about_data: &'static str,
     pub about_license: &'static str,
     pub about_close: &'static str,
+    pub silent_label: &'static str,
+    pub silent_off: &'static str,
+    pub silent_on: &'static str,
+    pub silent_warning: &'static str,
+    pub silent_retrying: &'static str,
+    pub silent_fallback_note: &'static str,
+    pub silent_fallback_failed: &'static str,
 }
 
 pub const ZH: Strings = Strings {
@@ -97,6 +104,13 @@ pub const ZH: Strings = Strings {
     about_data: "数据来源：本机 winget。程序不联网、不收集任何数据。",
     about_license: "开源协议：MIT License © 2026 LatteMint",
     about_close: "关闭",
+    silent_label: "静默升级",
+    silent_off: "关",
+    silent_on: "开",
+    silent_warning: "已开启『静默升级』。\n\n部分安装器可能仍会弹出安装窗口；需要管理员权限时，UAC 提权窗口无法跳过。\n如果静默升级失败，程序会自动改用普通方式重试。\n\n继续升级选中的 {n} 个软件吗？",
+    silent_retrying: "静默失败，改用普通方式重试…",
+    silent_fallback_note: "其中 {n} 个软件静默升级失败，已自动改用普通安装。",
+    silent_fallback_failed: "静默失败：{first}\n普通重试失败：{second}",
 };
 
 pub const EN: Strings = Strings {
@@ -144,6 +158,13 @@ pub const EN: Strings = Strings {
     about_data: "Data comes from your local winget. The app has no network access and collects no data.",
     about_license: "License: MIT © 2026 LatteMint",
     about_close: "Close",
+    silent_label: "Silent mode",
+    silent_off: "Off",
+    silent_on: "On",
+    silent_warning: "Silent upgrade is on.\n\nSome installers may still show their own window, and UAC prompts cannot be skipped when administrator rights are required.\nIf a silent upgrade fails, it will be retried normally.\n\nContinue upgrading the {n} selected package(s)?",
+    silent_retrying: "Silent upgrade failed; retrying normally…",
+    silent_fallback_note: "Of these, {n} package(s) failed silently and were upgraded normally on retry.",
+    silent_fallback_failed: "Silent attempt failed: {first}\nNormal retry also failed: {second}",
 };
 
 impl Strings {
