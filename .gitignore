@@ -35,3 +35,6 @@ desktop.ini
 
 # README 旧版备份（本地保留，不进仓库）
 /README.v0.1-backup.md
+
+# 用户本地截图
+/screenshot-*.png

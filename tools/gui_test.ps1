@@ -33,6 +33,10 @@ Add-Type -AssemblyName System.Windows.Forms
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 $OrigPath = $env:PATH
 $env:PATH = "$FakeDir;$env:PATH"
+$env:WINGET_PICKER_THEME = 'dark'
+$env:WINGET_PICKER_LANG = 'zh'
+$env:WINGET_PICKER_SILENT = '0'
+$env:WINGET_PICKER_NO_SAVE = '1'
 $workDir = if ($FakeDir) { $FakeDir } else { Split-Path $Exe }
 
 function Get-WindowText([IntPtr]$h) {

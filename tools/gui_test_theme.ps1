@@ -16,7 +16,10 @@ using System.Text;
 using System.Runtime.InteropServices;
 public static class ThemeTest {
     [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+    [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out RECT r);
+    [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref POINT p);
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr hdc, uint flags);
     [DllImport("user32.dll")] public static extern IntPtr SendMessageW(IntPtr h, uint msg, IntPtr w, IntPtr l);
@@ -124,6 +127,57 @@ Snap $hwnd "persist-nord.png"
 $results += "persist_ini=ok"
 if (!$p.HasExited) { $p.Kill() }
 Remove-Item Env:WINGET_PICKER_INI -ErrorAction SilentlyContinue
+
+# 4) 深色 → 浅色切换后，底部标签/按钮必须重绘成新主题颜色
+$env:WINGET_PICKER_THEME = 'dark'
+$env:WINGET_PICKER_NO_SAVE = '1'
+Stop-Apps
+$p = Start-Process -FilePath $Exe -PassThru
+$hwnd = Wait-Window $p
+if ($hwnd -eq [IntPtr]::Zero) { throw "主题重绘测试启动后未找到窗口" }
+Start-Sleep -Milliseconds 500
+# 1021 = 浅色
+[ThemeTest]::SendMessageW($hwnd, 0x111, [IntPtr]1021, [ThemeTest]::GetDlgItem($hwnd, 1021)) | Out-Null
+Start-Sleep -Milliseconds 800
+Snap $hwnd "theme-dark-to-light.png"
+$wr = New-Object ThemeTest+RECT
+$cr = New-Object ThemeTest+RECT
+[ThemeTest]::GetWindowRect($hwnd, [ref]$wr) | Out-Null
+[ThemeTest]::GetClientRect($hwnd, [ref]$cr) | Out-Null
+$pt = New-Object ThemeTest+POINT
+[ThemeTest]::ClientToScreen($hwnd, [ref]$pt) | Out-Null
+$ox = $pt.X - $wr.Left
+$oy = $pt.Y - $wr.Top
+# (x,y) 取各控件内部空白处：主题标签 / 语言标签 / 静默标签 / 主题按钮 / 语言按钮 / 静默按钮 / 关于按钮
+$samples = @(
+    @(66, 412), @(66, 448), @(633, 412),
+    @(158, 422), @(180, 458), @(688, 422), @(690, 458)
+)
+$img = New-Object System.Drawing.Bitmap (Join-Path $OutDir "theme-dark-to-light.png")
+$bad = @()
+foreach ($s in $samples) {
+    $c = $img.GetPixel($ox + $s[0], $oy + $s[1])
+    if ($c.R -lt 200 -or $c.G -lt 200 -or $c.B -lt 200) {
+        $bad += "($($s[0]),$($s[1]))=$($c.R),$($c.G),$($c.B)"
+    }
+}
+$img.Dispose()
+if ($bad.Count -gt 0) { throw "深色→浅色后底部控件未重绘：$($bad -join '; ')" }
+# 再切回深色，确认同样立即生效
+[ThemeTest]::SendMessageW($hwnd, 0x111, [IntPtr]1022, [ThemeTest]::GetDlgItem($hwnd, 1022)) | Out-Null
+Start-Sleep -Milliseconds 800
+Snap $hwnd "theme-light-to-dark.png"
+$img = New-Object System.Drawing.Bitmap (Join-Path $OutDir "theme-light-to-dark.png")
+$bright = @()
+foreach ($s in @(@(66, 412), @(66, 448), @(633, 412))) {
+    $c = $img.GetPixel($ox + $s[0], $oy + $s[1])
+    if ($c.R -gt 150) { $bright += "($($s[0]),$($s[1]))=$($c.R),$($c.G),$($c.B)" }
+}
+$img.Dispose()
+if ($bright.Count -gt 0) { throw "浅色→深色后底部控件未重绘：$($bright -join '; ')" }
+$results += "theme_switch_repaint=ok"
+if (!$p.HasExited) { $p.Kill() }
+Stop-Apps
 
 Write-Output ($results -join ' ')
 Write-Output "ALL_OK"

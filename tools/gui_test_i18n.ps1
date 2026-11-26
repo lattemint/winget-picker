@@ -66,6 +66,8 @@ $env:WINGET_PICKER_INI = $ini
 $env:WINGET_PICKER_NO_SAVE = '0'
 Remove-Item Env:WINGET_PICKER_LANG -ErrorAction SilentlyContinue
 Remove-Item Env:WINGET_PICKER_THEME -ErrorAction SilentlyContinue
+$env:WINGET_PICKER_THEME = 'dark'
+$env:WINGET_PICKER_SILENT = '0'
 Stop-Apps
 
 # 1) 默认中文 → 切 English

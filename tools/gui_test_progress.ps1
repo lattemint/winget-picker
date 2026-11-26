@@ -65,6 +65,10 @@ Get-Process winget-picker,winget -ErrorAction SilentlyContinue | Stop-Process -F
 Remove-Item "$FakeDir\calls.log" -ErrorAction SilentlyContinue
 $OrigPath = $env:PATH
 $env:PATH = "$FakeDir;$env:PATH"
+$env:WINGET_PICKER_THEME = 'dark'
+$env:WINGET_PICKER_LANG = 'zh'
+$env:WINGET_PICKER_SILENT = '0'
+$env:WINGET_PICKER_NO_SAVE = '1'
 $p = Start-Process -FilePath $Exe -WorkingDirectory $FakeDir -PassThru
 $hwnd = [IntPtr]::Zero
 $deadline = [DateTime]::Now.AddSeconds(10)

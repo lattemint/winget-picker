@@ -158,7 +158,7 @@ pub const EN: Strings = Strings {
     about_data: "Data comes from your local winget. The app has no network access and collects no data.",
     about_license: "License: MIT © 2026 LatteMint",
     about_close: "Close",
-    silent_label: "Silent mode",
+    silent_label: "Silent",
     silent_off: "Off",
     silent_on: "On",
     silent_warning: "Silent upgrade is on.\n\nSome installers may still show their own window, and UAC prompts cannot be skipped when administrator rights are required.\nIf a silent upgrade fails, it will be retried normally.\n\nContinue upgrading the {n} selected package(s)?",

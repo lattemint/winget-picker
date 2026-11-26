@@ -2248,13 +2248,16 @@ impl App {
             BS_PUSHBUTTON | WS_TABSTOP, 0, s(704), s(472), s(100), s(32), ID_BACK, font,
         );
 
-        // 设置区：主题分段按钮（只在初始界面显示）
+        // 设置区：2×2 表格。第一列靠左，第二列在右半区内居中。
+        let row1_y = s(400);
+        let row2_y = s(436);
+        let ctl_h = s(26);
+        let left_x = s(40);
+
+        // 第一列第一行：主题
         let theme_widths = [s(84), s(60), s(60), s(86), s(86)];
         let theme_gap = s(6);
-        let theme_label_w = s(56);
-        let theme_total: i32 =
-            theme_widths.iter().sum::<i32>() + theme_gap * 4 + theme_label_w + s(8);
-        let mut theme_x = (s(820) - theme_total) / 2;
+        let theme_label_w = s(72);
         let theme_label = make_child(
             hwnd,
             instance,
@@ -2262,14 +2265,14 @@ impl App {
             lang::t().theme_label,
             SS_LEFT | SS_NOPREFIX,
             0,
-            theme_x,
-            s(400),
+            left_x,
+            row1_y,
             theme_label_w,
-            s(26),
+            ctl_h,
             ID_THEME_LABEL,
             font,
         );
-        theme_x += theme_label_w + s(8);
+        let mut theme_x = left_x + theme_label_w + s(8);
         let mut theme_btns: [HWND; 5] = [std::ptr::null_mut(); 5];
         for (i, _choice) in theme::CHOICES.iter().enumerate() {
             theme_btns[i] = make_child(
@@ -2280,28 +2283,19 @@ impl App {
                 WS_TABSTOP,
                 0,
                 theme_x,
-                s(400),
+                row1_y,
                 theme_widths[i],
-                s(26),
+                ctl_h,
                 ID_THEME_BASE + i as i32,
                 font,
             );
             theme_x += theme_widths[i] + theme_gap;
         }
 
-        // 设置区第二行：语言 + 静默升级 + 关于（整行居中）
+        // 第一列第二行：语言
         let lang_widths = [s(90), s(64), s(80)];
         let lang_gap = s(6);
         let lang_label_w = s(72);
-        let silent_btn_w = s(48);
-        let silent_label_w = s(84);
-        let about_w = s(100);
-        let row_gap = s(24);
-        let lang_group =
-            lang_label_w + s(8) + lang_widths.iter().sum::<i32>() + lang_gap * 2;
-        let silent_group = silent_label_w + s(8) + silent_btn_w * 2 + lang_gap;
-        let row_total = lang_group + row_gap + silent_group + s(16) + about_w;
-        let mut row_x = (s(820) - row_total) / 2;
         let lang_label = make_child(
             hwnd,
             instance,
@@ -2309,14 +2303,14 @@ impl App {
             lang::t().lang_label,
             SS_LEFT | SS_NOPREFIX,
             0,
-            row_x,
-            s(436),
+            left_x,
+            row2_y,
             lang_label_w,
-            s(26),
+            ctl_h,
             ID_LANG_LABEL,
             font,
         );
-        row_x += lang_label_w + s(8);
+        let mut lang_x = left_x + lang_label_w + s(8);
         let mut lang_btns: [HWND; 3] = [std::ptr::null_mut(); 3];
         for (i, text) in lang::t().lang_labels.iter().enumerate() {
             lang_btns[i] = make_child(
@@ -2326,19 +2320,29 @@ impl App {
                 text,
                 WS_TABSTOP,
                 0,
-                row_x,
-                s(436),
+                lang_x,
+                row2_y,
                 lang_widths[i],
-                s(26),
+                ctl_h,
                 ID_LANG_BASE + i as i32,
                 font,
             );
-            row_x += lang_widths[i];
+            lang_x += lang_widths[i];
             if i + 1 < lang_widths.len() {
-                row_x += lang_gap;
+                lang_x += lang_gap;
             }
         }
-        row_x += row_gap;
+
+        // 第二列所在区域：右半区
+        let col2_left = s(552);
+        let col2_right = s(804);
+        let col2_w = col2_right - col2_left;
+
+        // 第二列第一行：静默升级
+        let silent_btn_w = s(48);
+        let silent_label_w = s(56);
+        let silent_group_w = silent_label_w + s(8) + silent_btn_w * 2 + lang_gap;
+        let silent_x = col2_left + (col2_w - silent_group_w) / 2;
         let silent_label = make_child(
             hwnd,
             instance,
@@ -2346,14 +2350,14 @@ impl App {
             lang::t().silent_label,
             SS_LEFT | SS_NOPREFIX,
             0,
-            row_x,
-            s(436),
+            silent_x,
+            row1_y,
             silent_label_w,
-            s(26),
+            ctl_h,
             ID_SILENT_LABEL,
             font,
         );
-        row_x += silent_label_w + s(8);
+        let silent_buttons_x = silent_x + silent_label_w + s(8);
         let silent_btns: [HWND; 2] = [
             make_child(
                 hwnd,
@@ -2362,10 +2366,10 @@ impl App {
                 lang::t().silent_off,
                 WS_TABSTOP,
                 0,
-                row_x,
-                s(436),
+                silent_buttons_x,
+                row1_y,
                 silent_btn_w,
-                s(26),
+                ctl_h,
                 ID_SILENT_OFF,
                 font,
             ),
@@ -2376,15 +2380,18 @@ impl App {
                 lang::t().silent_on,
                 WS_TABSTOP,
                 0,
-                row_x + silent_btn_w + lang_gap,
-                s(436),
+                silent_buttons_x + silent_btn_w + lang_gap,
+                row1_y,
                 silent_btn_w,
-                s(26),
+                ctl_h,
                 ID_SILENT_ON,
                 font,
             ),
         ];
-        row_x += silent_btn_w * 2 + lang_gap + s(16);
+
+        // 第二列第二行：关于
+        let about_w = s(100);
+        let about_x = col2_left + (col2_w - about_w) / 2;
         let btn_about = make_child(
             hwnd,
             instance,
@@ -2392,10 +2399,10 @@ impl App {
             lang::t().about,
             WS_TABSTOP,
             0,
-            row_x,
-            s(436),
+            about_x,
+            row2_y,
             about_w,
-            s(26),
+            ctl_h,
             ID_ABOUT,
             font,
         );
@@ -2513,7 +2520,21 @@ impl App {
             self.title,
             self.subtitle,
             self.status,
+            self.progress,
             self.theme_label,
+            self.theme_btns[0],
+            self.theme_btns[1],
+            self.theme_btns[2],
+            self.theme_btns[3],
+            self.theme_btns[4],
+            self.lang_label,
+            self.lang_btns[0],
+            self.lang_btns[1],
+            self.lang_btns[2],
+            self.silent_label,
+            self.silent_btns[0],
+            self.silent_btns[1],
+            self.btn_about,
             self.btn_view,
             self.btn_exit,
             self.btn_all,
@@ -2718,6 +2739,11 @@ impl App {
         }
         show(self.btn_about, init);
         enable(self.btn_about, init);
+        // 阶段切换时清掉残留的转圈像素（尤其是升级结束回到初始界面）
+        unsafe {
+            let rc = self.spinner_rect;
+            InvalidateRect(self.hwnd, &rc, 1);
+        }
         // 升级期间列表保持可用：可以滚动/查看进度，只是勾选会被锁定
         enable(self.list, list_mode || upgrading);
         enable(self.btn_all, list_mode);

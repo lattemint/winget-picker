@@ -119,6 +119,7 @@ Get-Process | Where-Object { $_.ProcessName -like '*winget-picker*' -or $_.Proce
 $env:WINGET_PICKER_THEME = 'light'
 $env:WINGET_PICKER_LANG = 'zh'
 $env:WINGET_PICKER_NO_SAVE = '1'
+$env:WINGET_PICKER_SILENT = '0'
 $env:FAKE_WINGET_LIST_DELAY_MS = '2000'
 $OrigPath = $env:PATH
 $env:PATH = "$FakeDir;$env:PATH"
@@ -169,6 +170,24 @@ Save-Zoom $u1 (Join-Path $OutDir 'spinner-upgrading.png') $rect 4
 $u1.Dispose(); $u2.Dispose()
 if ($upNonBg -le 3) { throw '升级中 spinner 不可见' }
 if ($upDiff -le 1) { throw '升级中 spinner 没有动画' }
+
+# 等升级结束汇总；关闭后回到初始界面，转圈必须被清除
+$summary = [IntPtr]::Zero
+$dl = [DateTime]::Now.AddSeconds(60)
+while ([DateTime]::Now -lt $dl) {
+    $summary = [SP]::FindWindowW('#32770', [NullString]::Value)
+    if ($summary -ne [IntPtr]::Zero) { break }
+    Start-Sleep -Milliseconds 250
+}
+if ($summary -eq [IntPtr]::Zero) { throw '升级结束汇总未出现' }
+[SP]::SendMessageW($summary, 0x111, [IntPtr]1, [IntPtr]::Zero) | Out-Null
+Start-Sleep -Milliseconds 900
+$b4 = Capture $hwnd
+$afterNonBg = Count-NonBg $b4 $rect
+Save-Zoom $b4 (Join-Path $OutDir 'spinner-after-upgrade.png') $rect 4
+$b4.Dispose()
+"after_upgrade_status=[$(Get-Text $status)] spinner_nonbg=$afterNonBg"
+if ($afterNonBg -gt 2) { throw '升级结束回到初始界面后 spinner 未清除' }
 
 if (!$p.HasExited) { $p.Kill() }
 Get-Process | Where-Object { $_.ProcessName -like '*winget-picker*' -or $_.ProcessName -like 'wp-test*' } |

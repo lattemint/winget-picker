@@ -46,15 +46,18 @@ function Save-WindowShot([IntPtr]$h, [string]$name) {
     Write-Output "saved $path"
 }
 
-Get-Process winget-picker,winget -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+$env:WINGET_PICKER_THEME = 'dark'
+$env:WINGET_PICKER_LANG = 'zh'
+$env:WINGET_PICKER_SILENT = '0'
+$env:WINGET_PICKER_NO_SAVE = '1'
+Get-Process | Where-Object { $_.ProcessName -like '*winget-picker*' -or $_.ProcessName -like 'wp-test*' } | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 400
 
 $p = Start-Process -FilePath $Exe -PassThru
 $hwnd = [IntPtr]::Zero
 $deadline = [DateTime]::Now.AddSeconds(10)
 while ([DateTime]::Now -lt $deadline) {
-    $hwnd = [V]::FindWindowW("WingetPickerWnd", [NullString]::Value)
-    if ($hwnd -ne [IntPtr]::Zero) { break }
+    if ($p.MainWindowHandle -ne 0) { $hwnd = $p.MainWindowHandle; break }
     Start-Sleep -Milliseconds 200
 }
 if ($hwnd -eq [IntPtr]::Zero) { throw "主窗口未出现" }
