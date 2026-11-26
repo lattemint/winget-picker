@@ -31,6 +31,7 @@ Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.Windows.Forms
 
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+$OrigPath = $env:PATH
 $env:PATH = "$FakeDir;$env:PATH"
 $workDir = if ($FakeDir) { $FakeDir } else { Split-Path $Exe }
 
@@ -215,3 +216,5 @@ if ($done -eq [IntPtr]::Zero) {
 Start-Sleep -Milliseconds 500
 if (!$p.HasExited) { $p.Kill() }
 Write-Output "done"
+
+if ($OrigPath) { $env:PATH = $OrigPath }

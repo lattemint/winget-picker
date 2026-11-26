@@ -88,6 +88,7 @@ foreach ($theme in 'light', 'dark', 'nord', 'nord-light', 'auto') {
 # 2) 深色列表 + 勾选框
 $env:WINGET_PICKER_THEME = 'dark'
 $env:WINGET_PICKER_NO_SAVE = '1'
+$OrigPath = $env:PATH
 $env:PATH = "$FakeDir;$env:PATH"
 Stop-Apps
 $p = Start-Process -FilePath $Exe -WorkingDirectory $FakeDir -PassThru
@@ -126,3 +127,5 @@ Remove-Item Env:WINGET_PICKER_INI -ErrorAction SilentlyContinue
 
 Write-Output ($results -join ' ')
 Write-Output "ALL_OK"
+
+if ($OrigPath) { $env:PATH = $OrigPath }

@@ -87,6 +87,7 @@ $calls = Join-Path $FakeDir 'calls.log'
 $env:WINGET_PICKER_LANG = 'zh'
 $env:WINGET_PICKER_THEME = 'dark'
 $env:WINGET_PICKER_NO_SAVE = '1'
+$OrigPath = $env:PATH
 $env:PATH = "$FakeDir;$env:PATH"
 
 # ---------------- 1) 静默开 ----------------
@@ -175,7 +176,7 @@ Stop-Apps
 # ---------------- 3) 设置持久化：点“开”写入 ini ----------------
 Remove-Item Env:WINGET_PICKER_SILENT -ErrorAction SilentlyContinue
 Remove-Item Env:WINGET_PICKER_NO_SAVE -ErrorAction SilentlyContinue
-Remove-Item Env:PATH -ErrorAction SilentlyContinue
+$env:PATH = $OrigPath
 $ini = Join-Path $env:TEMP 'winget-picker-silent-test.ini'
 Remove-Item $ini -ErrorAction SilentlyContinue
 $env:WINGET_PICKER_INI = $ini

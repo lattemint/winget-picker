@@ -94,6 +94,7 @@ if ($title2 -notmatch 'selective upgrade') { throw "重启未保持英文，标�
 Write-Output "persist_ok title=[$title2]"
 
 # 3) 英文列表 + 升级中状态（假 winget）
+$OrigPath = $env:PATH
 $env:PATH = "$FakeDir;$env:PATH"
 Stop-Apps
 $p = Start-Process -FilePath $Exe -WorkingDirectory $FakeDir -PassThru
@@ -121,7 +122,7 @@ $p.Kill()
 
 # 4) 切回中文
 Stop-Apps
-Remove-Item Env:PATH -ErrorAction SilentlyContinue
+$env:PATH = $OrigPath
 $p = Start-Process -FilePath $Exe -PassThru
 $hwnd = Wait-Window $p
 Start-Sleep -Milliseconds 500

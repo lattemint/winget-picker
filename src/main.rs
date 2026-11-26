@@ -407,6 +407,9 @@ const ID_SILENT_LABEL: i32 = 1015;
 const ID_SILENT_OFF: i32 = 1016;
 const ID_SILENT_ON: i32 = 1017;
 
+// Spinner
+const NULL_PEN: i32 = 8;
+
 /// 关于窗里的项目地址
 const REPO_URL: &str = "https://github.com/lattemint/winget-picker/";
 
@@ -580,6 +583,7 @@ unsafe extern "system" {
         len: i32,
         size: *mut SIZE,
     ) -> BOOL;
+    fn Ellipse(dc: HDC, left: i32, top: i32, right: i32, bottom: i32) -> BOOL;
 }
 
 #[link(name = "shell32")]
@@ -1350,6 +1354,48 @@ unsafe fn show_about(owner: HWND, font: HFONT, title_font: HFONT, dpi: i32) {
     }
 }
 
+// ---------------------------------------------------------------- 加载转圈
+
+fn mix_color(a: u32, b: u32, t: f64) -> u32 {
+    let ch = |shift: u32| -> u32 {
+        let av = ((a >> shift) & 0xFF) as f64;
+        let bv = ((b >> shift) & 0xFF) as f64;
+        (((av + (bv - av) * t).round() as i64).clamp(0, 255) as u32) << shift
+    };
+    ch(0) | ch(8) | ch(16)
+}
+
+/// 在主窗口上直接绘制转圈（与表头一致，不额外创建子窗口）。
+unsafe fn draw_spinner(hdc: HDC, rect: &RECT, frame: i64) {
+    let th = *theme::active();
+    let n = 8i64;
+    let w = rect.right - rect.left;
+    let h = rect.bottom - rect.top;
+    let cx = rect.left as f64 + w as f64 / 2.0;
+    let cy = rect.top as f64 + h as f64 / 2.0;
+    let radius = (w.min(h) as f64) / 2.0 - 1.5;
+    let dot = (w / 5).max(3);
+    for i in 0..n {
+        let phase = ((i + frame) % n + n) % n;
+        let factor = 0.25 + 0.75 * (phase as f64) / ((n - 1) as f64);
+        let color = mix_color(th.bg, th.accent, factor);
+        let angle = (i as f64) * std::f64::consts::TAU / (n as f64);
+        let x = cx + radius * angle.cos();
+        let y = cy + radius * angle.sin();
+        let left = (x.round() as i32) - dot / 2;
+        let top = (y.round() as i32) - dot / 2;
+        let dot_rect = RECT {
+            left,
+            top,
+            right: left + dot,
+            bottom: top + dot,
+        };
+        let brush = CreateSolidBrush(color);
+        FillRect(hdc, &dot_rect, brush);
+        DeleteObject(brush as HGDIOBJ);
+    }
+}
+
 unsafe fn register_control_classes(instance: HINSTANCE) {
     let class = wide("WPButton");
     let wc = WNDCLASSEXW {
@@ -2014,6 +2060,8 @@ struct App {
     font: HFONT,
     title_font: HFONT,
     dpi: i32,
+    spinner_frame: i64,
+    spinner_rect: RECT,
     theme_choice: theme::Choice,
     lang_choice: config::Lang,
     config: config::Config,
@@ -2115,8 +2163,14 @@ impl App {
         // 清单界面
         let status = make_child(
             hwnd, instance, &class_static, "",
-            SS_LEFT | SS_NOPREFIX, 0, s(16), s(10), s(788), s(22), ID_STATUS, font,
+            SS_LEFT | SS_NOPREFIX, 0, s(40), s(10), s(764), s(22), ID_STATUS, font,
         );
+        let spinner_rect = RECT {
+            left: s(16),
+            top: s(13),
+            right: s(16) + s(16),
+            bottom: s(13) + s(16),
+        };
         let class_progress = wide("msctls_progress32");
         let progress = make_child(
             hwnd, instance, &class_progress, "",
@@ -2390,6 +2444,8 @@ impl App {
             font,
             title_font,
             dpi,
+            spinner_frame: 0,
+            spinner_rect,
             theme_choice: initial_choice,
             lang_choice: initial_lang,
             config: cfg,
@@ -2623,6 +2679,10 @@ impl App {
             FillRect(hdc, line, border);
         }
         DeleteObject(border as HGDIOBJ);
+
+        if matches!(self.phase, Phase::Loading | Phase::Upgrading) {
+            draw_spinner(hdc, &self.spinner_rect, self.spinner_frame);
+        }
     }
 
     fn apply_phase(&mut self) {
@@ -2790,6 +2850,18 @@ impl App {
         }
         self.last_status_tick = Some(now);
         self.refresh_upgrade_status();
+    }
+
+    /// 加载/升级期间推动 spinner 旋转（复用 80ms 定时器）。
+    fn tick_spinner(&mut self) {
+        if !matches!(self.phase, Phase::Loading | Phase::Upgrading) {
+            return;
+        }
+        self.spinner_frame = self.spinner_frame.wrapping_add(1);
+        unsafe {
+            let rc = self.spinner_rect;
+            InvalidateRect(self.hwnd, &rc, 1);
+        }
     }
 
     fn insert_row(&self, index: usize) {
@@ -3502,6 +3574,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam:
                 }
             }
             with_app(|app| app.tick_upgrade_status());
+            with_app(|app| app.tick_spinner());
             0
         }
         WM_CLOSE => {

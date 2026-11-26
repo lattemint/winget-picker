@@ -20,6 +20,12 @@ fn main() {
 
     let listing = !args.iter().any(|a| a == "--id");
     if listing {
+        // 可选：模拟慢速列表（spinner 截图测试用）
+        if let Ok(v) = std::env::var("FAKE_WINGET_LIST_DELAY_MS") {
+            if let Ok(ms) = v.parse::<u64>() {
+                std::thread::sleep(Duration::from_millis(ms));
+            }
+        }
         if let Some(dir) = &exe_dir {
             if let Ok(text) = std::fs::read_to_string(dir.join("fixture.txt")) {
                 print!("{}", text);

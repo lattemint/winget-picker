@@ -63,6 +63,7 @@ function Shot([IntPtr]$h, [string]$name) {
 
 Get-Process winget-picker,winget -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 Remove-Item "$FakeDir\calls.log" -ErrorAction SilentlyContinue
+$OrigPath = $env:PATH
 $env:PATH = "$FakeDir;$env:PATH"
 $p = Start-Process -FilePath $Exe -WorkingDirectory $FakeDir -PassThru
 $hwnd = [IntPtr]::Zero
@@ -143,3 +144,5 @@ Get-Process winget -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAct
 $calls = (Get-Content "$FakeDir\calls.log" -ErrorAction SilentlyContinue | Measure-Object).Count
 Write-Output "summary_ok=$summaryOk calls_total=$calls"
 if ($lockOk -and $scrollOk -and $autoscrollOk -and $summaryOk) { Write-Output "ALL_OK" } else { Write-Output "SOME_FAILED" }
+
+if ($OrigPath) { $env:PATH = $OrigPath }
