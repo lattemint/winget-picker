@@ -17,6 +17,7 @@ use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::thread;
 
 mod config;
+mod lang;
 mod theme;
 
 // ---------------------------------------------------------------- Win32 类型
@@ -366,8 +367,7 @@ const VK_TAB: u16 = 9;
 const VK_ESCAPE: u16 = 27;
 const VK_SHIFT: i32 = 0x10;
 
-/// 列表列标题（后续 i18n 时改为按语言取）
-const COLUMN_TITLES: [&str; 5] = ["名称", "当前版本", "可用版本", "ID", "结果"];
+/// 列表列标题由 i18n 提供（`lang::t().columns`）。
 
 const MB_OK: UINT = 0x0000_0000;
 const MB_ICONINFORMATION: UINT = 0x0000_0040;
@@ -390,6 +390,8 @@ const ID_LIST: i32 = 1010;
 const ID_PROGRESS: i32 = 1011;
 const ID_THEME_LABEL: i32 = 1012;
 const ID_THEME_BASE: i32 = 1020; // 1020..=1024：5 个主题按钮
+const ID_LANG_LABEL: i32 = 1013;
+const ID_LANG_BASE: i32 = 1030; // 1030..=1032：跟随系统 / 中文 / English
 
 // 自绘控件相关
 const WM_PAINT: UINT = 0x000F;
@@ -535,6 +537,7 @@ unsafe extern "system" {
     fn GetConsoleWindow() -> HWND;
     fn LoadLibraryW(name: LPCWSTR) -> HMODULE;
     fn GetProcAddress(module: HMODULE, name: *const u8) -> *mut c_void;
+    fn GetUserDefaultUILanguage() -> u16;
 }
 
 #[link(name = "comctl32")]
@@ -591,13 +594,18 @@ fn rgb(r: u32, g: u32, b: u32) -> u32 {
     (r & 0xFF) | ((g & 0xFF) << 8) | ((b & 0xFF) << 16)
 }
 
+/// 系统 UI 语言是否为中文（用于“跟随系统”）。
+fn system_ui_is_chinese() -> bool {
+    unsafe { (GetUserDefaultUILanguage() & 0x03FF) == 0x0004 }
+}
+
 fn message_box(owner: HWND, text: &str, flags: UINT) {
     let _ = message_box_ex(owner, text, flags);
 }
 
 fn message_box_ex(owner: HWND, text: &str, flags: UINT) -> i32 {
     let t = wide(text);
-    let c = wide("winget 选择性更新");
+    let c = wide(lang::t().app_name);
     unsafe { MessageBoxW(owner, t.as_ptr(), c.as_ptr(), flags) }
 }
 
@@ -1261,8 +1269,9 @@ fn winget_run_direct(
         let raw_err = err_rx.recv_timeout(read_wait).unwrap_or_default();
         if timed_out {
             let secs = timeout.map(|d| d.as_secs()).unwrap_or(0);
-            return Err(format!(
-                "winget 响应超时（{secs} 秒）。\n可能是网络或软件源问题，请稍后重试。"
+            return Err(lang::tpl(
+                lang::t().timeout,
+                &[("secs", &secs.to_string())],
             ));
         }
         let status = match exit {
@@ -1276,8 +1285,9 @@ fn winget_run_direct(
             stderr: decode_output(&raw_err),
         });
     }
-    Err(format!(
-        "无法启动 winget（{last_err}）。\n请确认系统已安装“应用安装程序”(App Installer)。"
+    Err(lang::tpl(
+        lang::t().spawn_failed,
+        &[("err", &last_err)],
     ))
 }
 
@@ -1313,7 +1323,7 @@ fn winget_run_via_cmd(
         Ok(c) => {
             c
         }
-        Err(e) => return Err(format!("无法启动 cmd.exe（{e}）")),
+        Err(e) => return Err(lang::tpl(lang::t().cmd_spawn_failed, &[("err", &e.to_string())])),
     };
     let mut timed_out = false;
     let status = match timeout {
@@ -1343,8 +1353,9 @@ fn winget_run_via_cmd(
     let _ = std::fs::remove_file(&err_path);
     if timed_out {
         let secs = timeout.map(|d| d.as_secs()).unwrap_or(0);
-        return Err(format!(
-            "winget 响应超时（{secs} 秒）。\n可能是网络或软件源问题，请稍后重试。"
+        return Err(lang::tpl(
+            lang::t().timeout,
+            &[("secs", &secs.to_string())],
         ));
     }
     let code = status.map(|s| s.code().unwrap_or(-1)).unwrap_or(-1);
@@ -1408,7 +1419,7 @@ fn code_str(code: i32) -> String {
     if code < 0 {
         format!("0x{:08X}", code as u32)
     } else {
-        format!("退出码 {code}")
+        lang::tpl(lang::t().exit_code, &[("code", &code.to_string())])
     }
 }
 
@@ -1437,10 +1448,9 @@ fn fetch_upgrades() -> Result<Vec<Item>, String> {
         }
         detail.push_str(&tail_lines(&out.stderr, 4));
     }
-    Err(format!(
-        "winget 返回错误（{}）。\n{}",
-        code_str(out.code),
-        detail.trim()
+    Err(lang::tpl(
+        lang::t().winget_error,
+        &[("code", &code_str(out.code)), ("detail", detail.trim())],
     ))
 }
 
@@ -1469,7 +1479,10 @@ fn upgrade_package(id: &str) -> Result<(), String> {
     }
     let detail = tail_lines(&text, 8);
     if detail.is_empty() {
-        Err(format!("winget 失败（{}）", code_str(out.code)))
+        Err(lang::tpl(
+            lang::t().winget_failed,
+            &[("code", &code_str(out.code))],
+        ))
     } else {
         Err(detail)
     }
@@ -1542,6 +1555,8 @@ struct App {
     btn_back: HWND,
     theme_label: HWND,
     theme_btns: [HWND; 5],
+    lang_label: HWND,
+    lang_btns: [HWND; 3],
     phase: Phase,
     items: Vec<Item>,
     tx: Sender<TaskMsg>,
@@ -1563,6 +1578,7 @@ struct App {
     last_status_tick: Option<std::time::Instant>,
     font: HFONT,
     theme_choice: theme::Choice,
+    lang_choice: config::Lang,
     config: config::Config,
     col_w: [i32; 5],
     head_pad: i32,
@@ -1643,19 +1659,19 @@ impl App {
 
         // 初始界面
         let title = make_child(
-            hwnd, instance, &class_static, "winget 选择性更新",
+            hwnd, instance, &class_static, lang::t().app_name,
             SS_CENTER | SS_NOPREFIX, 0, 0, s(38), s(820), s(40), ID_TITLE, title_font,
         );
         let subtitle = make_child(
-            hwnd, instance, &class_static, "先查看可更新的软件，勾选后再只升级你选择的部分",
+            hwnd, instance, &class_static, lang::t().subtitle,
             SS_CENTER | SS_NOPREFIX, 0, 0, s(92), s(820), s(26), ID_SUBTITLE, font,
         );
         let btn_view = make_child(
-            hwnd, instance, &class_button, "查看升级",
+            hwnd, instance, &class_button, lang::t().view,
             BS_PUSHBUTTON | WS_TABSTOP, 0, s(250), s(170), s(150), s(44), ID_VIEW, font,
         );
         let btn_exit = make_child(
-            hwnd, instance, &class_button, "退出",
+            hwnd, instance, &class_button, lang::t().exit,
             BS_PUSHBUTTON | WS_TABSTOP, 0, s(420), s(170), s(150), s(44), ID_EXIT, font,
         );
 
@@ -1683,11 +1699,11 @@ impl App {
             bottom: s(79) + s(385),
         };
         let list_w = list_rect.right - list_rect.left;
-        let fixed_w = s(105) + s(105) + s(70);
+        let fixed_w = s(105) + s(105) + s(96);
         let remain = (list_w - fixed_w).max(s(240));
         let name_w = remain * 60 / 100;
         let id_w = remain - name_w;
-        let col_w = [name_w, s(105), s(105), id_w, s(70)];
+        let col_w = [name_w, s(105), s(105), id_w, s(96)];
 
         let list = make_child(
             hwnd,
@@ -1707,7 +1723,7 @@ impl App {
             let ex_style =
                 (LVS_EX_FULLROWSELECT | LVS_EX_CHECKBOXES | LVS_EX_DOUBLEBUFFER) as LPARAM;
             SendMessageW(list, LVM_SETEXTENDEDLISTVIEWSTYLE, 0, ex_style);
-            for (i, title) in COLUMN_TITLES.iter().enumerate() {
+            for (i, title) in lang::t().columns.iter().enumerate() {
                 let t = wide(title);
                 let mut col = LVCOLUMNW::default();
                 col.mask = LVCF_FMT | LVCF_WIDTH | LVCF_TEXT | LVCF_SUBITEM;
@@ -1725,26 +1741,26 @@ impl App {
             }
         }
         let btn_all = make_child(
-            hwnd, instance, &class_button, "全选",
-            BS_PUSHBUTTON | WS_TABSTOP, 0, s(16), s(472), s(90), s(32), ID_ALL, font,
+            hwnd, instance, &class_button, lang::t().all,
+            BS_PUSHBUTTON | WS_TABSTOP, 0, s(16), s(472), s(100), s(32), ID_ALL, font,
         );
         let btn_none = make_child(
-            hwnd, instance, &class_button, "全不选",
-            BS_PUSHBUTTON | WS_TABSTOP, 0, s(114), s(472), s(90), s(32), ID_NONE, font,
+            hwnd, instance, &class_button, lang::t().none,
+            BS_PUSHBUTTON | WS_TABSTOP, 0, s(124), s(472), s(110), s(32), ID_NONE, font,
         );
         let btn_upgrade = make_child(
-            hwnd, instance, &class_button, "升级选中 (0)",
-            BS_PUSHBUTTON | WS_TABSTOP, 0, s(212), s(472), s(150), s(32), ID_UPGRADE, font,
+            hwnd, instance, &class_button, &lang::tpl(lang::t().upgrade_button, &[("n", "0")]),
+            BS_PUSHBUTTON | WS_TABSTOP, 0, s(242), s(472), s(170), s(32), ID_UPGRADE, font,
         );
         let btn_back = make_child(
-            hwnd, instance, &class_button, "返回",
-            BS_PUSHBUTTON | WS_TABSTOP, 0, s(714), s(472), s(90), s(32), ID_BACK, font,
+            hwnd, instance, &class_button, lang::t().back,
+            BS_PUSHBUTTON | WS_TABSTOP, 0, s(704), s(472), s(100), s(32), ID_BACK, font,
         );
 
         // 设置区：主题分段按钮（只在初始界面显示）
         let theme_widths = [s(84), s(60), s(60), s(86), s(86)];
         let theme_gap = s(6);
-        let theme_label_w = s(40);
+        let theme_label_w = s(56);
         let theme_total: i32 =
             theme_widths.iter().sum::<i32>() + theme_gap * 4 + theme_label_w + s(8);
         let mut theme_x = (s(820) - theme_total) / 2;
@@ -1752,7 +1768,7 @@ impl App {
             hwnd,
             instance,
             &class_static,
-            "主题",
+            lang::t().theme_label,
             SS_LEFT | SS_NOPREFIX,
             0,
             theme_x,
@@ -1764,12 +1780,12 @@ impl App {
         );
         theme_x += theme_label_w + s(8);
         let mut theme_btns: [HWND; 5] = [std::ptr::null_mut(); 5];
-        for (i, choice) in theme::CHOICES.iter().enumerate() {
+        for (i, _choice) in theme::CHOICES.iter().enumerate() {
             theme_btns[i] = make_child(
                 hwnd,
                 instance,
                 &class_button,
-                choice.label_zh(),
+                lang::t().theme_labels[i],
                 WS_TABSTOP,
                 0,
                 theme_x,
@@ -1782,9 +1798,51 @@ impl App {
             theme_x += theme_widths[i] + theme_gap;
         }
 
+        // 设置区第二行：语言
+        let lang_widths = [s(90), s(64), s(80)];
+        let lang_gap = s(6);
+        let lang_label_w = s(72);
+        let lang_total: i32 =
+            lang_widths.iter().sum::<i32>() + lang_gap * 2 + lang_label_w + s(8);
+        let mut lang_x = (s(820) - lang_total) / 2;
+        let lang_label = make_child(
+            hwnd,
+            instance,
+            &class_static,
+            lang::t().lang_label,
+            SS_LEFT | SS_NOPREFIX,
+            0,
+            lang_x,
+            s(436),
+            lang_label_w,
+            s(26),
+            ID_LANG_LABEL,
+            font,
+        );
+        lang_x += lang_label_w + s(8);
+        let mut lang_btns: [HWND; 3] = [std::ptr::null_mut(); 3];
+        for (i, text) in lang::t().lang_labels.iter().enumerate() {
+            lang_btns[i] = make_child(
+                hwnd,
+                instance,
+                &class_button,
+                text,
+                WS_TABSTOP,
+                0,
+                lang_x,
+                s(436),
+                lang_widths[i],
+                s(26),
+                ID_LANG_BASE + i as i32,
+                font,
+            );
+            lang_x += lang_widths[i] + lang_gap;
+        }
+
         let (tx, rx) = channel();
 
         let initial_choice = cfg.theme;
+        let initial_lang = cfg.lang;
         let mut app = Box::new(App {
             hwnd,
             title,
@@ -1800,6 +1858,8 @@ impl App {
             btn_back,
             theme_label,
             theme_btns,
+            lang_label,
+            lang_btns,
             phase: Phase::Init,
             items: Vec::new(),
             tx,
@@ -1818,6 +1878,7 @@ impl App {
             last_status_tick: None,
             font,
             theme_choice: initial_choice,
+            lang_choice: initial_lang,
             config: cfg,
             col_w,
             head_pad: s(22),
@@ -1828,6 +1889,9 @@ impl App {
         SendMessageW(progress, PBM_SETRANGE32, 0, 100);
         for (i, btn) in app.theme_btns.iter().enumerate() {
             set_button_selected(*btn, initial_choice.index() == i);
+        }
+        for (i, btn) in app.lang_btns.iter().enumerate() {
+            set_button_selected(*btn, initial_lang.index() == i);
         }
         app.apply_theme_visual(initial_choice);
         app.apply_phase();
@@ -1901,6 +1965,61 @@ impl App {
         self.config.save();
     }
 
+    /// 用户切换语言：应用 + 写配置。
+    fn set_lang(&mut self, choice: config::Lang) {
+        unsafe {
+            self.apply_language_visual(choice);
+        }
+        self.config.save();
+    }
+
+    /// 应用语言到所有界面文案（不写配置）。
+    unsafe fn apply_language_visual(&mut self, choice: config::Lang) {
+        self.lang_choice = choice;
+        let idx = lang::resolve(choice, system_ui_is_chinese());
+        lang::set_index(idx);
+        let t = lang::t();
+
+        let title = wide(t.app_name);
+        SetWindowTextW(self.hwnd, title.as_ptr());
+        set_text(self.title, t.app_name);
+        set_text(self.subtitle, t.subtitle);
+        set_text(self.btn_view, t.view);
+        set_text(self.btn_exit, t.exit);
+        set_text(self.btn_all, t.all);
+        set_text(self.btn_none, t.none);
+        set_text(self.btn_back, t.back);
+        set_text(self.theme_label, t.theme_label);
+        set_text(self.lang_label, t.lang_label);
+        for (i, btn) in self.theme_btns.iter().enumerate() {
+            set_text(*btn, t.theme_labels[i]);
+        }
+        for (i, btn) in self.lang_btns.iter().enumerate() {
+            set_text(*btn, t.lang_labels[i]);
+            set_button_selected(*btn, choice.index() == i);
+        }
+        self.refresh_upgrade_button();
+        InvalidateRect(self.hwnd, std::ptr::null(), 1);
+        let repaint = [
+            self.title,
+            self.subtitle,
+            self.theme_label,
+            self.lang_label,
+            self.btn_view,
+            self.btn_exit,
+            self.btn_all,
+            self.btn_none,
+            self.btn_upgrade,
+            self.btn_back,
+        ];
+        for h in repaint {
+            if !h.is_null() {
+                InvalidateRect(h, std::ptr::null(), 1);
+            }
+        }
+        self.config.lang = choice;
+    }
+
     /// 主窗口客户区绘制：自绘表头 + ListView 边框。
     unsafe fn paint(&self, hdc: HDC) {
         if self.phase == Phase::Init {
@@ -1926,7 +2045,7 @@ impl App {
         SetTextColor(hdc, th.muted);
         SelectObject(hdc, self.font as HGDIOBJ);
         let mut x = hr.left;
-        for (i, title) in COLUMN_TITLES.iter().enumerate() {
+        for (i, title) in lang::t().columns.iter().enumerate() {
             let w = self.col_w[i];
             let left_pad = if i == 0 { self.head_pad } else { 0 };
             let mut tr = RECT {
@@ -1943,7 +2062,7 @@ impl App {
                 &mut tr,
                 0x0000 | DT_VCENTER | DT_SINGLELINE,
             );
-            if i + 1 < COLUMN_TITLES.len() {
+            if i + 1 < lang::t().columns.len() {
                 let sep = RECT {
                     left: x + w - 1,
                     top: hr.top + 6,
@@ -1987,6 +2106,11 @@ impl App {
         show(self.btn_back, !init);
         show(self.theme_label, init);
         for btn in self.theme_btns.iter() {
+            show(*btn, init);
+            enable(*btn, init);
+        }
+        show(self.lang_label, init);
+        for btn in self.lang_btns.iter() {
             show(*btn, init);
             enable(*btn, init);
         }
@@ -2040,7 +2164,8 @@ impl App {
 
     fn refresh_upgrade_button(&mut self) {
         let n = self.checked_indices().len();
-        set_text(self.btn_upgrade, &format!("升级选中 ({n})"));
+        let text = lang::tpl(lang::t().upgrade_button, &[("n", &n.to_string())]);
+        set_text(self.btn_upgrade, &text);
         enable(self.btn_upgrade, self.phase == Phase::List && n > 0);
     }
 
@@ -2081,14 +2206,22 @@ impl App {
     }
 
     fn upgrade_status_text(&self, secs: u64) -> String {
-        format!(
-            "正在升级 {}/{}（成功 {} · 失败 {} · 已用 {}s）：{}",
-            self.current_n,
-            self.total,
-            self.ok,
-            self.fail,
-            secs,
-            truncate_chars(&self.current_name, 48)
+        let n = self.current_n.to_string();
+        let total = self.total.to_string();
+        let ok = self.ok.to_string();
+        let fail = self.fail.to_string();
+        let secs = secs.to_string();
+        let name = truncate_chars(&self.current_name, 48);
+        lang::tpl(
+            lang::t().upgrade_status,
+            &[
+                ("n", &n),
+                ("total", &total),
+                ("ok", &ok),
+                ("fail", &fail),
+                ("secs", &secs),
+                ("name", &name),
+            ],
         )
     }
 
@@ -2173,7 +2306,7 @@ impl App {
         unsafe {
             SendMessageW(self.list, LVM_DELETEALLITEMS, 0, 0);
         }
-        self.set_status("正在获取可更新的软件列表，请稍候…");
+        self.set_status(lang::t().fetching);
         self.apply_phase();
         self.start_timer();
         let tx = self.tx.clone();
@@ -2198,7 +2331,7 @@ impl App {
         }
         let n = self.items.len();
         self.phase = Phase::List;
-        self.set_status(&format!("共 {n} 个可更新软件。勾选后点击“升级选中”。"));
+        self.set_status(&lang::t().list_ready(n));
         self.apply_phase();
         if n > 0 {
             // 让第一行获得键盘焦点，使空格键可直接勾选
@@ -2220,7 +2353,7 @@ impl App {
         for &i in &indices {
             if let Some(item) = self.items.get(i) {
                 selected.push((i, item.clone()));
-                self.set_result(i, "等待中");
+                self.set_result(i, lang::t().waiting);
                 if let Some(r) = self.results.get_mut(i) {
                     *r = 3;
                 }
@@ -2237,7 +2370,10 @@ impl App {
         self.current_start = None;
         self.last_status_tick = None;
         self.set_progress(0);
-        self.set_status(&format!("准备升级 {total} 个软件…"));
+        self.set_status(&lang::tpl(
+            lang::t().preparing,
+            &[("total", &total.to_string())],
+        ));
         self.apply_phase();
         unsafe {
             SendMessageW(self.progress, PBM_SETRANGE32, 0, total as LPARAM);
@@ -2309,11 +2445,11 @@ impl App {
                 match result {
                     Err(e) => {
                         self.reset_to_init();
-                        Some(format!("获取可更新软件列表失败。\n\n{e}"))
+                        Some(lang::tpl(lang::t().fetch_failed, &[("e", &e)]))
                     }
                     Ok(items) if items.is_empty() => {
                         self.reset_to_init();
-                        Some("没有检测到可更新的软件，系统当前已是最新状态。".to_string())
+                        Some(lang::t().no_updates.to_string())
                     }
                     Ok(items) => {
                         self.fill_list(items);
@@ -2338,7 +2474,7 @@ impl App {
                         *r = 3;
                     }
                 }
-                self.set_result(index, "升级中…");
+                self.set_result(index, lang::t().upgrading);
                 self.refresh_upgrade_status();
                 self.set_progress(self.finished);
                 unsafe {
@@ -2349,7 +2485,12 @@ impl App {
                 None
             }
             TaskMsg::ProgressResult { index, ok } => {
-                self.set_result(index, if ok { "成功" } else { "失败" });
+                let result_text = if ok {
+                    lang::t().ok
+                } else {
+                    lang::t().failed
+                };
+                self.set_result(index, result_text);
                 if let Some(r) = self.results.get_mut(index) {
                     *r = if ok { 1 } else { 2 };
                 }
@@ -2362,22 +2503,31 @@ impl App {
                     self.fail += 1;
                 }
                 self.set_progress(self.finished);
-                self.set_status(&format!(
-                    "已完成 {}/{}（成功 {}，失败 {}）",
-                    self.finished, self.total, self.ok, self.fail
-                ));
+                let done_text = lang::tpl(
+                    lang::t().done_status,
+                    &[
+                        ("finished", &self.finished.to_string()),
+                        ("total", &self.total.to_string()),
+                        ("ok", &self.ok.to_string()),
+                        ("fail", &self.fail.to_string()),
+                    ],
+                );
+                self.set_status(&done_text);
                 self.invalidate_list();
                 None
             }
             TaskMsg::UpgradeDone { ok, fail, failures } => {
                 self.stop_timer();
                 let mut text = if fail == 0 {
-                    format!("本轮升级完成：{ok} 个软件全部升级成功。")
+                    lang::t().summary_all_ok_text(ok)
                 } else {
-                    format!("本轮升级结束：成功 {ok} 个，失败 {fail} 个。")
+                    lang::tpl(
+                        lang::t().summary_done,
+                        &[("ok", &ok.to_string()), ("fail", &fail.to_string())],
+                    )
                 };
                 if !failures.is_empty() {
-                    text.push_str("\n\n以下软件未能升级：");
+                    text.push_str(lang::t().summary_failures);
                     for (i, (name, detail)) in failures.iter().take(5).enumerate() {
                         text.push_str(&format!("\n{}. {}", i + 1, name));
                         let d = detail.replace('\n', " ");
@@ -2387,7 +2537,10 @@ impl App {
                         }
                     }
                     if failures.len() > 5 {
-                        text.push_str(&format!("\n… 另有 {} 个失败。", failures.len() - 5));
+                        text.push_str(&lang::tpl(
+                            lang::t().summary_more,
+                            &[("n", &(failures.len() - 5).to_string())],
+                        ));
                     }
                 }
                 self.reset_to_init();
@@ -2440,7 +2593,7 @@ impl App {
                 }
                 let indices = self.checked_indices();
                 if indices.is_empty() {
-                    return Some("请先勾选需要升级的软件。".to_string());
+                    return Some(lang::t().select_hint.to_string());
                 }
                 self.begin_upgrade(indices);
                 None
@@ -2449,6 +2602,13 @@ impl App {
                 let index = (id - ID_THEME_BASE) as usize;
                 if let Some(choice) = theme::Choice::from_index(index) {
                     self.set_theme(choice);
+                }
+                None
+            }
+            id if (ID_LANG_BASE..=ID_LANG_BASE + 2).contains(&id) => {
+                let index = (id - ID_LANG_BASE) as usize;
+                if let Some(choice) = config::Lang::from_index(index) {
+                    self.set_lang(choice);
                 }
                 None
             }
@@ -2592,10 +2752,7 @@ impl App {
     fn on_close(&mut self) -> CloseDecision {
         if self.phase == Phase::Upgrading {
             self.stop_timer();
-            CloseDecision::Confirm(
-                "升级仍在后台进行中。\n\n确定要退出界面吗？（已启动的 winget 进程可能继续运行）"
-                    .to_string(),
-            )
+            CloseDecision::Confirm(lang::t().close_confirm.to_string())
         } else {
             CloseDecision::Allow
         }
@@ -2791,6 +2948,8 @@ fn main() {
 
         // 读取便携配置（主题/语言/静默），并注册自绘按钮窗口类
         let cfg = config::Config::load();
+        let system_zh = system_ui_is_chinese();
+        lang::set_index(lang::resolve(cfg.lang, system_zh));
         theme::set_active_index(cfg.theme.resolve_index(theme::system_uses_dark()));
         register_control_classes(instance);
 
@@ -2836,7 +2995,7 @@ fn main() {
             bottom: 520 * dpi / 96,
         };
         AdjustWindowRectEx(&mut rect, style, 0, 0);
-        let title = wide("winget 选择性更新");
+        let title = wide(lang::t().app_name);
         let hwnd = CreateWindowExW(
             0,
             class_ptr,
@@ -2852,7 +3011,11 @@ fn main() {
             std::ptr::null_mut(),
         );
         if hwnd.is_null() {
-            message_box(std::ptr::null_mut(), "创建窗口失败。", MB_OK | MB_ICONWARNING);
+            message_box(
+                std::ptr::null_mut(),
+                lang::t().window_create_failed,
+                MB_OK | MB_ICONWARNING,
+            );
             return;
         }
 

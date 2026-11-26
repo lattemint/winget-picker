@@ -35,6 +35,24 @@ impl Lang {
             _ => None,
         }
     }
+
+    /// 按钮序号（0=跟随系统，1=中文，2=English）
+    pub fn index(self) -> usize {
+        match self {
+            Lang::Auto => 0,
+            Lang::Zh => 1,
+            Lang::En => 2,
+        }
+    }
+
+    pub fn from_index(i: usize) -> Option<Self> {
+        match i {
+            0 => Some(Lang::Auto),
+            1 => Some(Lang::Zh),
+            2 => Some(Lang::En),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]

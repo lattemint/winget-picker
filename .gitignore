@@ -29,3 +29,6 @@ winget_probe*_result.txt
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# 设计源文件（不算构建产物，但也不进仓库）
+*.vectorcraft
